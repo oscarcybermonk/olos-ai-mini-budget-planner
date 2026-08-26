@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#163c34">
+  <meta name="description" content="A calm, local-first personal budget and cashflow planner.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/assets/app.css">
+  <title>Olos-AI Mini Budget Planner</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">O</span><div><strong>Olos-AI</strong><span>Mini Budget Planner</span></div></div>
+    <div class="period-controls" aria-label="Selected month">
+      <button id="previous-month" class="icon-button" aria-label="Previous month">‹</button>
+      <button id="current-month" class="period-label"></button>
+      <button id="next-month" class="icon-button" aria-label="Next month">›</button>
+    </div>
+    <button id="theme-toggle" class="icon-button" aria-label="Toggle colour theme">◐</button>
+  </header>
+
+  <main class="shell">
+    <section aria-labelledby="snapshot-heading">
+      <div class="section-heading"><div><p class="eyebrow">Monthly snapshot</p><h1 id="snapshot-heading">Your money, at a glance</h1></div><p class="privacy-note"><span></span> Stored on this device</p></div>
+      <div class="snapshot" id="snapshot" aria-live="polite"></div>
+    </section>
+
+    <div class="main-grid">
+      <section class="panel quick-panel" aria-labelledby="quick-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Quick add</p><h2 id="quick-heading">Record money in seconds</h2></div><button id="voice-button" class="voice-button" type="button"><span aria-hidden="true">●</span> Speak</button></div>
+        <div class="type-tabs" role="group" aria-label="Transaction type">
+          <button class="type-tab active" data-type="expense">Expense</button><button class="type-tab" data-type="income">Income</button><button class="type-tab" data-type="bill">Bill</button><button class="type-tab" data-type="savings">Savings</button>
+        </div>
+        <form id="transaction-form">
+          <input id="transaction-id" type="hidden">
+          <div class="form-row amount-row"><label>Amount <span class="amount-input"><span>$</span><input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required></span></label><label>Date <input id="transaction-date" name="date" type="date" required></label></div>
+          <label>Description <input id="description" name="description" maxlength="160" placeholder="e.g. Groceries" required></label>
+          <div class="form-row"><label>Category <input id="category" name="category" list="category-list" maxlength="80" required><datalist id="category-list"></datalist></label><label>Note <input id="note" name="note" maxlength="1000" placeholder="Optional"></label></div>
+          <div id="draft-note" class="draft-note" hidden><strong>Voice draft ready.</strong> Check every detail, then choose Save. Nothing has been recorded yet.</div>
+          <div class="form-actions"><button id="cancel-edit" class="text-button" type="button" hidden>Cancel edit</button><button class="primary-button" type="submit"><span id="save-label">Save expense</span> <span aria-hidden="true">→</span></button></div>
+        </form>
+        <p id="voice-help" class="help-text">Voice creates an editable draft only. You always confirm before saving.</p>
+      </section>
+
+      <aside class="panel upcoming-panel" aria-labelledby="upcoming-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Next 30 days</p><h2 id="upcoming-heading">Upcoming</h2></div><button id="add-recurring" class="small-button">+ Recurring</button></div>
+        <div id="upcoming-list" class="stack-list"></div>
+      </aside>
+    </div>
+
+    <section class="panel activity-panel" aria-labelledby="activity-heading">
+      <div class="panel-heading"><div><p class="eyebrow">Latest records</p><h2 id="activity-heading">Recent activity</h2></div><div class="export-links"><a href="/api/export.csv">CSV</a><a href="/api/export.json">Backup</a></div></div>
+      <div id="activity-list" class="activity-list"></div>
+    </section>
+
+    <details class="data-tools">
+      <summary>Data and backup tools</summary>
+      <p>Your live database stays in the documented local <code>data</code> folder. Restoring a backup replaces current records and rejects the same backup if submitted twice.</p>
+      <label class="file-button">Choose JSON backup<input id="restore-file" type="file" accept="application/json,.json"></label>
+    </details>
+  </main>
+
+  <dialog id="recurring-dialog">
+    <form id="recurring-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">Plan ahead</p><h2>Add recurring item</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <div class="type-tabs" role="group" aria-label="Recurring item type"><button type="button" class="recurring-tab active" data-type="bill">Bill</button><button type="button" class="recurring-tab" data-type="income">Income</button><button type="button" class="recurring-tab" data-type="savings">Savings</button></div>
+      <div class="form-row"><label>Amount <span class="amount-input"><span>$</span><input id="recurring-amount" inputmode="decimal" required></span></label><label>Frequency <select id="frequency"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="yearly">Yearly</option></select></label></div>
+      <label>Description <input id="recurring-description" maxlength="160" required placeholder="e.g. Electricity"></label>
+      <div class="form-row"><label>Category <input id="recurring-category" list="category-list" required></label><label>Next due <input id="next-due" type="date" required></label></div>
+      <label class="check-label"><input id="automated" type="checkbox"> This payment or transfer is already automated elsewhere</label>
+      <p class="help-text">This planner tracks the schedule. It never moves money.</p>
+      <button class="primary-button wide" type="submit">Add recurring item</button>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

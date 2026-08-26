@@ -1,0 +1,12 @@
+{
+  "name": "olos-ai-mini-budget-planner",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {"node": ">=20"},
+  "scripts": {
+    "build": "node --check frontend/assets/app.js",
+    "lint": "node --check frontend/assets/app.js",
+    "test:frontend": "node --check frontend/assets/app.js && node --test tests/frontend.test.mjs"
+  },
+  "type": "module"
+}
