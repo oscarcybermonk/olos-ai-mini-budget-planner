@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .db import APP_ROOT, DB_PATH, connect, init_db, transaction
 from .domain import parse_transaction_text, projected_dates
-from .schemas import BackupIn, RecordOccurrenceIn, RecurringIn, TransactionIn, VoiceIn
+from .schemas import BackupIn, CreditFacilityIn, CreditPaymentIn, RecordOccurrenceIn, RecurringIn, TransactionIn, VoiceIn
 
 app = FastAPI(title="Olos-AI Mini Budget Planner", version="1.0.0", docs_url="/api/docs", redoc_url=None)
 STATIC_DIR = APP_ROOT / "frontend"
@@ -36,8 +36,21 @@ def startup():
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(_request: Request, exc: RequestValidationError):
-    errors = [{"field": ".".join(str(part) for part in error["loc"][1:]), "message": error["msg"]} for error in exc.errors()]
-    return JSONResponse(status_code=422, content={"detail": "Please check the highlighted values", "errors": errors})
+    friendly = {
+        "amount_minor": "Enter an amount greater than zero",
+        "description": "Enter a description",
+        "transaction_date": "Choose a valid date",
+        "category": "Choose or enter a category",
+        "transaction_type": "Choose a valid transaction type",
+        "credit_facility_id": "Choose the account used",
+        "payment_method": "Choose a valid payment method",
+    }
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error["loc"][1:]) or "form"
+        errors.append({"field": field, "message": friendly.get(field, str(error["msg"]).replace("Value error, ", ""))})
+    detail = errors[0]["message"] if errors else "Check the entered values"
+    return JSONResponse(status_code=422, content={"detail": detail, "errors": errors})
 
 
 @app.exception_handler(Exception)
@@ -58,6 +71,38 @@ def categories():
         return [row_dict(row) for row in db.execute("SELECT id,name,transaction_type FROM categories ORDER BY transaction_type,name")]
 
 
+def facility_dict(row):
+    result = row_dict(row)
+    result["available_credit_minor"] = result["credit_limit_minor"] - result["amount_owed_minor"]
+    return result
+
+
+def apply_facility_effect(db, transaction_record, direction: int) -> None:
+    transaction_record = dict(transaction_record)
+    facility_id = transaction_record.get("credit_facility_id")
+    if not facility_id:
+        return
+    role = transaction_record.get("transaction_role", "ordinary")
+    method = transaction_record.get("payment_method")
+    if role == "credit_payment":
+        delta = -transaction_record["amount_minor"] * direction
+    elif transaction_record["transaction_type"] == "expense" and method in {"credit", "pay_later"}:
+        delta = transaction_record["amount_minor"] * direction
+    else:
+        return
+    facility = db.execute("SELECT * FROM credit_facilities WHERE id=? AND active=1", (facility_id,)).fetchone()
+    if not facility:
+        raise HTTPException(422, "Choose an active credit or pay-later account")
+    if role != "credit_payment" and facility["facility_type"] != method:
+        raise HTTPException(422, "The selected account does not match the payment method")
+    new_owed = facility["amount_owed_minor"] + delta
+    if new_owed < 0:
+        raise HTTPException(422, "Payment cannot be more than the amount owed")
+    if new_owed > facility["credit_limit_minor"]:
+        raise HTTPException(422, "This expense is more than the account's available credit")
+    db.execute("UPDATE credit_facilities SET amount_owed_minor=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_owed, facility_id))
+
+
 @app.get("/api/transactions")
 def list_transactions(limit: int = Query(30, ge=1, le=200), month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$")):
     sql, params = "SELECT * FROM transactions", []
@@ -72,9 +117,10 @@ def create_transaction(item: TransactionIn, idempotency_key: str | None = Header
         if idempotency_key:
             existing = db.execute("SELECT resource_id FROM idempotency_keys WHERE key=? AND resource_type='transaction'", (idempotency_key,)).fetchone()
             if existing: return row_dict(db.execute("SELECT * FROM transactions WHERE id=?", (existing[0],)).fetchone())
-        values = item.model_dump(mode="json")
-        cursor = db.execute("""INSERT INTO transactions(transaction_type,amount_minor,currency,description,category,transaction_date,note)
-          VALUES (:transaction_type,:amount_minor,:currency,:description,:category,:transaction_date,:note)""", values)
+        values = item.model_dump(mode="json") | {"transaction_role": "ordinary"}
+        apply_facility_effect(db, values, 1)
+        cursor = db.execute("""INSERT INTO transactions(transaction_type,amount_minor,currency,description,category,transaction_date,note,payment_method,credit_facility_id,transaction_role)
+          VALUES (:transaction_type,:amount_minor,:currency,:description,:category,:transaction_date,:note,:payment_method,:credit_facility_id,:transaction_role)""", values)
         if idempotency_key: db.execute("INSERT INTO idempotency_keys(key,resource_type,resource_id) VALUES (?,'transaction',?)", (idempotency_key, cursor.lastrowid))
         return row_dict(db.execute("SELECT * FROM transactions WHERE id=?", (cursor.lastrowid,)).fetchone())
 
@@ -82,21 +128,80 @@ def create_transaction(item: TransactionIn, idempotency_key: str | None = Header
 @app.put("/api/transactions/{transaction_id}")
 def update_transaction(transaction_id: int, item: TransactionIn):
     with transaction() as db:
-        if not db.execute("SELECT 1 FROM transactions WHERE id=?", (transaction_id,)).fetchone(): raise HTTPException(404, "Transaction not found")
-        values = item.model_dump(mode="json") | {"id": transaction_id}
+        existing = db.execute("SELECT * FROM transactions WHERE id=?", (transaction_id,)).fetchone()
+        if not existing: raise HTTPException(404, "Transaction not found")
+        if existing["transaction_role"] == "credit_payment": raise HTTPException(422, "Credit payments cannot be edited; delete and record a new payment")
+        apply_facility_effect(db, existing, -1)
+        values = item.model_dump(mode="json") | {"id": transaction_id, "transaction_role": "ordinary"}
+        apply_facility_effect(db, values, 1)
         db.execute("""UPDATE transactions SET transaction_type=:transaction_type,amount_minor=:amount_minor,currency=:currency,
-          description=:description,category=:category,transaction_date=:transaction_date,note=:note,updated_at=CURRENT_TIMESTAMP WHERE id=:id""", values)
+          description=:description,category=:category,transaction_date=:transaction_date,note=:note,payment_method=:payment_method,
+          credit_facility_id=:credit_facility_id,transaction_role=:transaction_role,updated_at=CURRENT_TIMESTAMP WHERE id=:id""", values)
         return row_dict(db.execute("SELECT * FROM transactions WHERE id=?", (transaction_id,)).fetchone())
 
 
 @app.delete("/api/transactions/{transaction_id}", status_code=204)
 def delete_transaction(transaction_id: int):
     with transaction() as db:
-        occurrence = db.execute("SELECT recurring_occurrence_id FROM transactions WHERE id=?", (transaction_id,)).fetchone()
+        occurrence = db.execute("SELECT * FROM transactions WHERE id=?", (transaction_id,)).fetchone()
         if not occurrence: raise HTTPException(404, "Transaction not found")
+        apply_facility_effect(db, occurrence, -1)
         db.execute("DELETE FROM transactions WHERE id=?", (transaction_id,))
-        if occurrence[0]: db.execute("DELETE FROM recurring_occurrences WHERE id=?", (occurrence[0],))
+        if occurrence["recurring_occurrence_id"]: db.execute("DELETE FROM recurring_occurrences WHERE id=?", (occurrence["recurring_occurrence_id"],))
     return Response(status_code=204)
+
+
+@app.get("/api/credit-facilities")
+def list_credit_facilities():
+    with connect() as db:
+        return [facility_dict(row) for row in db.execute("SELECT * FROM credit_facilities WHERE active=1 ORDER BY name,id")]
+
+
+@app.post("/api/credit-facilities", status_code=201)
+def create_credit_facility(item: CreditFacilityIn):
+    values = item.model_dump(mode="json")
+    with transaction() as db:
+        cursor = db.execute("""INSERT INTO credit_facilities(name,facility_type,credit_limit_minor,amount_owed_minor,currency,note)
+          VALUES (:name,:facility_type,:credit_limit_minor,:amount_owed_minor,:currency,:note)""", values)
+        return facility_dict(db.execute("SELECT * FROM credit_facilities WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+@app.put("/api/credit-facilities/{facility_id}")
+def update_credit_facility(facility_id: int, item: CreditFacilityIn):
+    values = item.model_dump(mode="json") | {"id": facility_id}
+    with transaction() as db:
+        if not db.execute("SELECT 1 FROM credit_facilities WHERE id=? AND active=1", (facility_id,)).fetchone():
+            raise HTTPException(404, "Credit facility not found")
+        db.execute("""UPDATE credit_facilities SET name=:name,facility_type=:facility_type,credit_limit_minor=:credit_limit_minor,
+          amount_owed_minor=:amount_owed_minor,currency=:currency,note=:note,updated_at=CURRENT_TIMESTAMP WHERE id=:id""", values)
+        return facility_dict(db.execute("SELECT * FROM credit_facilities WHERE id=?", (facility_id,)).fetchone())
+
+
+@app.delete("/api/credit-facilities/{facility_id}", status_code=204)
+def deactivate_credit_facility(facility_id: int):
+    with transaction() as db:
+        facility = db.execute("SELECT * FROM credit_facilities WHERE id=? AND active=1", (facility_id,)).fetchone()
+        if not facility: raise HTTPException(404, "Credit facility not found")
+        if facility["amount_owed_minor"]:
+            raise HTTPException(409, "Record the remaining balance before removing this account")
+        if db.execute("SELECT 1 FROM transactions WHERE credit_facility_id=? LIMIT 1", (facility_id,)).fetchone():
+            raise HTTPException(409, "An account with transaction history cannot be removed")
+        db.execute("UPDATE credit_facilities SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?", (facility_id,))
+    return Response(status_code=204)
+
+
+@app.post("/api/credit-facilities/{facility_id}/payments", status_code=201)
+def record_credit_payment(facility_id: int, item: CreditPaymentIn):
+    with transaction() as db:
+        facility = db.execute("SELECT * FROM credit_facilities WHERE id=? AND active=1", (facility_id,)).fetchone()
+        if not facility: raise HTTPException(404, "Credit facility not found")
+        record = {"transaction_type": "bill", "amount_minor": item.amount_minor, "credit_facility_id": facility_id,
+                  "transaction_role": "credit_payment", "payment_method": "debit"}
+        apply_facility_effect(db, record, 1)
+        cursor = db.execute("""INSERT INTO transactions(transaction_type,amount_minor,currency,description,category,transaction_date,note,payment_method,credit_facility_id,transaction_role)
+          VALUES ('bill',?,?,?,?,?,?, 'debit',?,'credit_payment')""",
+          (item.amount_minor, facility["currency"], f"{facility['name']} payment", "Credit repayment", item.transaction_date.isoformat(), item.note, facility_id))
+        return row_dict(db.execute("SELECT * FROM transactions WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
 @app.get("/api/recurring")
@@ -159,6 +264,17 @@ def upcoming(days: int = Query(30, ge=1, le=366), from_date: date | None = None)
     return occurrence_rows(start, start + timedelta(days=days))
 
 
+@app.get("/api/calendar/{month}")
+def calendar_projection(month: str):
+    try:
+        year, month_number = map(int, month.split("-"))
+        start = date(year, month_number, 1)
+        end = date(year, month_number, monthrange(year, month_number)[1])
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Month must use YYYY-MM")
+    return {"month": month, "items": occurrence_rows(start, end)}
+
+
 @app.post("/api/occurrences/{rule_id}/{due_date}/record", status_code=201)
 def record_occurrence(rule_id: int, due_date: date, payload: RecordOccurrenceIn):
     with transaction() as db:
@@ -188,15 +304,19 @@ def summary(month: str):
     try:
         year, month_number = map(int, month.split("-")); start = date(year, month_number, 1); end = date(year, month_number, monthrange(year, month_number)[1])
     except (ValueError, TypeError): raise HTTPException(422, "Month must use YYYY-MM")
-    totals = {"actual_income": 0, "actual_expenses": 0, "actual_bills": 0, "actual_savings": 0}
+    totals = {"actual_income": 0, "actual_expenses": 0, "actual_bills": 0, "actual_savings": 0, "actual_credit_payments": 0, "actual_cash_expenses": 0, "actual_credit_funded_expenses": 0}
     mapping = {"income": "actual_income", "expense": "actual_expenses", "bill": "actual_bills", "savings": "actual_savings"}
     with connect() as db:
-        for row in db.execute("SELECT transaction_type,SUM(amount_minor) total FROM transactions WHERE transaction_date BETWEEN ? AND ? GROUP BY transaction_type", (start.isoformat(), end.isoformat())):
+        credit_payments = db.execute("SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE transaction_date BETWEEN ? AND ? AND transaction_role='credit_payment'", (start.isoformat(), end.isoformat())).fetchone()[0]
+        totals["actual_credit_payments"] = credit_payments
+        totals["actual_cash_expenses"] = db.execute("SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE transaction_date BETWEEN ? AND ? AND transaction_role='ordinary' AND transaction_type='expense' AND (payment_method IS NULL OR payment_method IN ('cash','debit'))", (start.isoformat(), end.isoformat())).fetchone()[0]
+        totals["actual_credit_funded_expenses"] = db.execute("SELECT COALESCE(SUM(amount_minor),0) FROM transactions WHERE transaction_date BETWEEN ? AND ? AND transaction_role='ordinary' AND transaction_type='expense' AND payment_method IN ('credit','pay_later')", (start.isoformat(), end.isoformat())).fetchone()[0]
+        for row in db.execute("SELECT transaction_type,SUM(amount_minor) total FROM transactions WHERE transaction_date BETWEEN ? AND ? AND transaction_role='ordinary' GROUP BY transaction_type", (start.isoformat(), end.isoformat())):
             totals[mapping[row["transaction_type"]]] = row["total"]
     remaining = {"income": 0, "bill": 0, "savings": 0}
     for item in occurrence_rows(start, end):
         if item["state"] in {"upcoming", "due"}: remaining[item["transaction_type"]] += item["amount_minor"]
-    expected = totals["actual_income"] + remaining["income"] - totals["actual_expenses"] - totals["actual_bills"] - remaining["bill"] - totals["actual_savings"] - remaining["savings"]
+    expected = totals["actual_income"] + remaining["income"] - totals["actual_cash_expenses"] - totals["actual_bills"] - totals["actual_credit_payments"] - remaining["bill"] - totals["actual_savings"] - remaining["savings"]
     return {"month": month, **totals, "expected_income": remaining["income"], "bills_remaining": remaining["bill"], "planned_savings_remaining": remaining["savings"], "expected_remaining": expected}
 
 
@@ -205,7 +325,7 @@ def parse_voice(payload: VoiceIn): return parse_transaction_text(payload.text)
 
 
 def backup_data():
-    tables = ["transactions", "recurring_rules", "recurring_occurrences", "categories"]
+    tables = ["transactions", "recurring_rules", "recurring_occurrences", "categories", "credit_facilities"]
     with connect() as db:
         data = {table if table != "recurring_occurrences" else "occurrences": [row_dict(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY id")] for table in tables}
     return {"version": 1, "exported_at": datetime.now().astimezone().isoformat(), "currency": "AUD", **data}
@@ -218,7 +338,7 @@ def export_json():
 
 @app.get("/api/export.csv")
 def export_csv():
-    output = io.StringIO(); fields = ["id","transaction_type","amount_minor","currency","description","category","transaction_date","note","recurring_occurrence_id","created_at","updated_at"]
+    output = io.StringIO(); fields = ["id","transaction_type","transaction_role","amount_minor","currency","description","category","transaction_date","payment_method","credit_facility_id","note","recurring_occurrence_id","created_at","updated_at"]
     writer = csv.DictWriter(output, fieldnames=fields); writer.writeheader()
     with connect() as db:
         for row in db.execute("SELECT * FROM transactions ORDER BY transaction_date,id"): writer.writerow({key: row[key] for key in fields})
@@ -232,17 +352,19 @@ def restore_backup(payload: BackupIn, confirm: bool = False):
     raw = json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode(); digest = hashlib.sha256(raw).hexdigest()
     with transaction() as db:
         if db.execute("SELECT 1 FROM import_history WHERE digest=?", (digest,)).fetchone(): raise HTTPException(409, "This backup has already been restored")
-        db.execute("DELETE FROM transactions"); db.execute("DELETE FROM recurring_occurrences"); db.execute("DELETE FROM recurring_rules"); db.execute("DELETE FROM categories")
+        db.execute("DELETE FROM transactions"); db.execute("DELETE FROM recurring_occurrences"); db.execute("DELETE FROM recurring_rules"); db.execute("DELETE FROM categories"); db.execute("DELETE FROM credit_facilities")
         allowed = {
           "categories": ["id","name","transaction_type"], "recurring_rules": ["id","transaction_type","amount_minor","currency","description","category","frequency","start_date","next_due_date","end_date","active","automated_externally","note","created_at","updated_at"],
-          "occurrences": ["id","recurring_rule_id","due_date","state","transaction_id","created_at"], "transactions": ["id","transaction_type","amount_minor","currency","description","category","transaction_date","note","recurring_occurrence_id","created_at","updated_at"]}
-        for name in ("categories","recurring_rules","occurrences","transactions"):
+          "occurrences": ["id","recurring_rule_id","due_date","state","transaction_id","created_at"],
+          "credit_facilities": ["id","name","facility_type","credit_limit_minor","amount_owed_minor","currency","note","active","created_at","updated_at"],
+          "transactions": ["id","transaction_type","amount_minor","currency","description","category","transaction_date","note","recurring_occurrence_id","created_at","updated_at","payment_method","credit_facility_id","transaction_role"]}
+        for name in ("categories","recurring_rules","credit_facilities","occurrences","transactions"):
             table = "recurring_occurrences" if name == "occurrences" else name
             for record in getattr(payload, name):
                 columns = [column for column in allowed[name] if column in record]
                 db.execute(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", [record[column] for column in columns])
         db.execute("INSERT INTO import_history(digest) VALUES (?)", (digest,))
-    return {"restored": True, "transactions": len(payload.transactions), "recurring_rules": len(payload.recurring_rules)}
+    return {"restored": True, "transactions": len(payload.transactions), "recurring_rules": len(payload.recurring_rules), "credit_facilities": len(payload.credit_facilities)}
 
 
 if STATIC_DIR.exists():

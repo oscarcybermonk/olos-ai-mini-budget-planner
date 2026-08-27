@@ -10,7 +10,7 @@ DATA_DIR = Path(os.environ.get("OLOS_BUDGET_DATA_DIR", APP_ROOT / "data"))
 DB_PATH = DATA_DIR / "olos-mini-budget.sqlite3"
 
 DEFAULT_CATEGORIES = {
-    "expense": ["Groceries", "Dining", "Fuel", "Transport", "Housing", "Utilities", "Phone/Internet", "Subscriptions", "Health", "Shopping", "Entertainment", "Travel", "Other"],
+    "expense": ["Groceries", "Dining", "Fuel", "Transport", "Housing", "Utilities", "Phone/Internet", "Subscriptions", "Health", "Shopping", "Entertainment", "Travel", "Work", "Business", "Olos-AI", "Other"],
     "bill": ["Housing", "Utilities", "Phone/Internet", "Subscriptions", "Health", "Other"],
     "income": ["Salary", "Other Income"],
     "savings": ["Savings"],
@@ -69,6 +69,16 @@ def init_db() -> None:
           transaction_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(recurring_rule_id, due_date)
         );
+        CREATE TABLE IF NOT EXISTS credit_facilities (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+          facility_type TEXT NOT NULL CHECK(facility_type IN ('credit','pay_later')),
+          credit_limit_minor INTEGER NOT NULL CHECK(credit_limit_minor > 0),
+          amount_owed_minor INTEGER NOT NULL DEFAULT 0 CHECK(amount_owed_minor >= 0),
+          currency TEXT NOT NULL DEFAULT 'AUD', note TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS transactions (
           id INTEGER PRIMARY KEY, transaction_type TEXT NOT NULL CHECK(transaction_type IN ('expense','income','bill','savings')),
           amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), currency TEXT NOT NULL DEFAULT 'AUD',
@@ -86,5 +96,12 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
         CREATE INDEX IF NOT EXISTS idx_rules_due ON recurring_rules(next_due_date, active);
         """)
+        transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
+        if "payment_method" not in transaction_columns:
+            db.execute("ALTER TABLE transactions ADD COLUMN payment_method TEXT")
+        if "credit_facility_id" not in transaction_columns:
+            db.execute("ALTER TABLE transactions ADD COLUMN credit_facility_id INTEGER REFERENCES credit_facilities(id)")
+        if "transaction_role" not in transaction_columns:
+            db.execute("ALTER TABLE transactions ADD COLUMN transaction_role TEXT NOT NULL DEFAULT 'ordinary'")
         for kind, names in DEFAULT_CATEGORIES.items():
             db.executemany("INSERT OR IGNORE INTO categories(name, transaction_type) VALUES (?, ?)", [(name, kind) for name in names])

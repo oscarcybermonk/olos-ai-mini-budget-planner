@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#163c34">
   <meta name="description" content="A calm, local-first personal budget and cashflow planner.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/app.css?v=2">
   <title>Olos-AI Mini Budget Planner</title>
 </head>
 <body>
@@ -14,7 +14,7 @@
     <div class="brand"><span class="brand-mark" aria-hidden="true">O</span><div><strong>Olos-AI</strong><span>Mini Budget Planner</span></div></div>
     <div class="period-controls" aria-label="Selected month">
       <button id="previous-month" class="icon-button" aria-label="Previous month">‹</button>
-      <button id="current-month" class="period-label"></button>
+      <button id="current-month" class="period-label" aria-haspopup="dialog" title="Open month calendar"></button>
       <button id="next-month" class="icon-button" aria-label="Next month">›</button>
     </div>
     <button id="theme-toggle" class="icon-button" aria-label="Toggle colour theme">◐</button>
@@ -32,11 +32,16 @@
         <div class="type-tabs" role="group" aria-label="Transaction type">
           <button class="type-tab active" data-type="expense">Expense</button><button class="type-tab" data-type="income">Income</button><button class="type-tab" data-type="bill">Bill</button><button class="type-tab" data-type="savings">Savings</button>
         </div>
-        <form id="transaction-form">
+        <form id="transaction-form" novalidate>
           <input id="transaction-id" type="hidden">
-          <div class="form-row amount-row"><label>Amount <span class="amount-input"><span>$</span><input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" required></span></label><label>Date <input id="transaction-date" name="date" type="date" required></label></div>
-          <label>Description <input id="description" name="description" maxlength="160" placeholder="e.g. Groceries" required></label>
-          <div class="form-row"><label>Category <input id="category" name="category" list="category-list" maxlength="80" required><datalist id="category-list"></datalist></label><label>Note <input id="note" name="note" maxlength="1000" placeholder="Optional"></label></div>
+          <p id="entry-kind" class="entry-kind" aria-live="polite">Recording an expense</p>
+          <div class="form-row amount-row"><label>Amount <span class="amount-input"><span>$</span><input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-describedby="amount-error"></span><small id="amount-error" class="field-error"></small></label><label>Date <input id="transaction-date" name="transaction_date" type="date" aria-describedby="transaction-date-error"><small id="transaction-date-error" class="field-error"></small></label></div>
+          <label>Description <input id="description" name="description" maxlength="160" placeholder="e.g. Groceries" aria-describedby="description-error"><small id="description-error" class="field-error"></small></label>
+          <div class="form-row"><label>Category or tag <input id="category" name="category" list="category-list" maxlength="80" aria-describedby="category-error"><datalist id="category-list"></datalist><small id="category-error" class="field-error"></small></label><label>Note <input id="note" name="note" maxlength="1000" placeholder="Optional"></label></div>
+          <div id="payment-fields" class="payment-fields">
+            <label>Paid with <select id="payment-method"><option value="debit" selected>Debit</option><option value="cash">Cash</option><option value="credit">Credit</option><option value="pay_later">Pay Later</option></select></label>
+            <label id="facility-select-label" hidden>Account <select id="expense-facility" aria-describedby="credit-facility-id-error"></select><small id="credit-facility-id-error" class="field-error"></small></label>
+          </div>
           <div id="draft-note" class="draft-note" hidden><strong>Voice draft ready.</strong> Check every detail, then choose Save. Nothing has been recorded yet.</div>
           <div class="form-actions"><button id="cancel-edit" class="text-button" type="button" hidden>Cancel edit</button><button class="primary-button" type="submit"><span id="save-label">Save expense</span> <span aria-hidden="true">→</span></button></div>
         </form>
@@ -53,6 +58,12 @@
       <div class="panel-heading"><div><p class="eyebrow">Latest records</p><h2 id="activity-heading">Recent activity</h2></div><div class="export-links"><a href="/api/export.csv">CSV</a><a href="/api/export.json">Backup</a></div></div>
       <div id="activity-list" class="activity-list"></div>
     </section>
+
+    <details id="credit-section" class="credit-section">
+      <summary><span>Credit &amp; Pay Later <small id="facility-count"></small></span><span aria-hidden="true">⌄</span></summary>
+      <div class="credit-heading"><p>Optional balance tracking. Purchases stay expenses; repayments affect cashflow once.</p><button id="add-facility" class="small-button">+ Add account</button></div>
+      <div id="facility-list" class="facility-list"></div>
+    </details>
 
     <details class="data-tools">
       <summary>Data and backup tools</summary>
@@ -73,7 +84,35 @@
       <button class="primary-button wide" type="submit">Add recurring item</button>
     </form>
   </dialog>
+  <dialog id="calendar-dialog" class="calendar-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">Planned money</p><h2 id="calendar-title">Month</h2></div><button class="icon-button dialog-close" aria-label="Close calendar">×</button></div>
+    <div class="calendar-weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+    <div id="calendar-grid" class="calendar-grid" role="grid" aria-label="Monthly recurring items"></div>
+    <div id="calendar-day-detail" class="calendar-day-detail" aria-live="polite">Choose a marked day to see its plans.</div>
+    <div class="marker-key" aria-label="Calendar marker key"><span><i class="marker income"></i>Income</span><span><i class="marker bill"></i>Bills</span><span><i class="marker savings"></i>Savings</span></div>
+  </dialog>
+  <dialog id="facility-dialog">
+    <form id="facility-form" method="dialog" novalidate>
+      <div class="dialog-heading"><div><p class="eyebrow">Optional tracking</p><h2>Add credit account</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <label>Account name <input id="facility-name" maxlength="100" placeholder="e.g. Main credit card"></label>
+      <div class="form-row"><label>Type <select id="facility-type"><option value="credit">Credit</option><option value="pay_later">Pay Later</option></select></label><label>Credit limit <span class="amount-input"><span>$</span><input id="facility-limit" inputmode="decimal" placeholder="0.00"></span></label></div>
+      <label>Current amount owed <span class="amount-input"><span>$</span><input id="facility-owed" inputmode="decimal" value="0.00"></span></label>
+      <label>Note <input id="facility-note" maxlength="1000" placeholder="Optional"></label>
+      <button class="primary-button wide" type="submit">Add account</button>
+    </form>
+  </dialog>
+  <dialog id="payment-dialog">
+    <form id="payment-form" method="dialog" novalidate>
+      <input id="payment-facility-id" type="hidden">
+      <div class="dialog-heading"><div><p class="eyebrow">Record cashflow</p><h2 id="payment-title">Account payment</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <p id="payment-balance" class="dialog-summary"></p>
+      <div class="form-row"><label>Payment amount <span class="amount-input"><span>$</span><input id="payment-amount" inputmode="decimal" placeholder="0.00"></span></label><label>Date <input id="payment-date" type="date"></label></div>
+      <label>Note <input id="payment-note" maxlength="1000" placeholder="Optional"></label>
+      <p class="help-text">This reduces the amount owed and counts as cash leaving now. It is not counted again as ordinary spending.</p>
+      <button class="primary-button wide" type="submit">Record payment</button>
+    </form>
+  </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js" defer></script>
+  <script src="/assets/app.js?v=2" defer></script>
 </body>
 </html>

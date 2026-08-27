@@ -17,10 +17,14 @@ The first usable local version includes:
 - localhost-only default and explicitly enabled trusted-LAN operation;
 - automatic schema creation and default category seeding;
 - backend and frontend-focused automated tests.
+- field-level Quick Add validation, visible activity actions and a UI-only first-run example;
+- compact recurring calendar markers and accessible recurring-action cues;
+- optional generic credit/pay-later facilities, expense payment methods and repayment cashflow;
+- lightweight Work, Business and Olos-AI expense categories/tags.
 
 ## Architecture
 
-FastAPI serves both a REST API and the dependency-free production web interface. SQLite persistence is isolated in `data/`. Domain helpers own exact money conversion, recurrence advancement and voice-text parsing. Recurring database rows hold schedule definitions; only user-recorded or skipped occurrences are persisted.
+FastAPI serves both a REST API and the dependency-free production web interface. SQLite persistence is isolated in `data/`. Startup applies additive schema migrations for payment-method and credit fields without resetting existing records. Domain helpers own exact money conversion, recurrence advancement and voice-text parsing. Recurring database rows hold schedule definitions; only user-recorded or skipped occurrences are persisted.
 
 The normal user path is one Python server and one browser tab. No Node process is needed for normal use.
 
@@ -36,6 +40,7 @@ There is no bank connection, reconciliation, tax logic, investing or trading, ac
 - LAN mode relies on trusted-network isolation and has no login or TLS. It must not be exposed to the public internet.
 - Browser speech recognition differs by browser and may be unavailable on some iPhones. Keyboard dictation remains a supported fallback.
 - PWA shell caching helps the interface load, but financial operations require connection to the local server.
+- Credit balances are manually maintained; there are no statements, interest calculations, provider rules or repayment recommendations.
 - Monthly recurrence uses calendar clamping while retaining the original anchor day. For example, a schedule started on the 31st uses February's last day, then returns to the 31st when available.
 
 ## Next logical phase
@@ -44,4 +49,4 @@ Use the tool with real personal workflows, then prioritise only observed frictio
 
 ## Olos-AI Mini Budget Planner Apple Client
 
-A plausible next phase is a SwiftUI client calling the existing local REST API. It could provide iPhone entry and native speech capture, an iPad dashboard, a macOS menu-bar entry surface, a Watch shortcut, and a Siri/Shortcuts action such as “Log $18 lunch in Olos Mini Budget.” Face ID could protect the native client. These are future concepts only; the current web/API version exists to prove utility before native investment.
+A plausible next phase is an offline-first SwiftUI client for iPhone, iPad and macOS calling the existing local REST API, with native speech capture and a future optional private sync mechanism. A Watch companion should remain tiny: quick expense/income/savings and voice entry, payment-method/account choice where practical, marking a recurring item paid, and glances at available cash and upcoming commitments. No SwiftUI, WatchKit, cloud relay or Apple sync is implemented here.

@@ -1,6 +1,6 @@
 # Olos-AI Mini Budget Planner
 
-A small, local-first personal budget and cashflow planner for one person. It records income, expenses, bills and savings; projects recurring commitments; and shows what is approximately available after known plans. It is not accounting, tax, banking, investing or financial-advice software.
+A small, local-first personal budget and cashflow planner for one person. It records income, expenses, bills and savings; projects recurring commitments; optionally tracks simple credit/pay-later balances; and shows what is approximately available after known plans. It is not accounting, tax, banking, investing or financial-advice software.
 
 The application has no telemetry, advertising, cloud login or external AI dependency. Financial calculations use deterministic Python logic and integer cents. Voice is optional and only prepares an editable draft.
 
@@ -17,6 +17,8 @@ responsive HTML/CSS/JavaScript PWA
 ```
 
 The frontend and API share one local server. The API remains platform-neutral for a possible native Apple client.
+
+Quick Add keeps an entered amount, description, date and note when the transaction type changes, while clearly relabelling the entry. A default category changes to the new type; a custom category/tag is preserved. Expense categories include lightweight `Work`, `Business`, and `Olos-AI` options.
 
 ## Prerequisites and first run
 
@@ -62,14 +64,15 @@ Back up the JSON file somewhere you control. Closing the server before directly 
 
 ## How monthly cashflow is calculated
 
-All amounts are stored as integer minor units (AUD cents). For a selected month:
+All amounts are stored as integer minor units (AUD cents). Cash/debit expenses reduce current cash immediately. Credit/pay-later purchases still appear in spending and increase the selected facility's amount owed, but do not reduce cash until a repayment is recorded. For a selected month:
 
 ```text
 expected remaining =
   actual income
   + unrecorded expected income
-  - actual expenses
+  - actual cash/debit expenses
   - actual paid bills
+  - actual credit/pay-later repayments
   - unrecorded planned bills
   - actual savings
   - unrecorded planned savings
@@ -77,9 +80,15 @@ expected remaining =
 
 Recorded and skipped recurring occurrences are excluded from the planned totals, preventing double counting. Schedule definitions are projected as needed; thousands of future rows are not generated.
 
+## Credit and Pay Later
+
+The collapsed **Credit & Pay Later** section is optional. Each account stores its name, kind, limit, current amount owed and an optional note. Available credit is always calculated as `limit - owed`; it is not stored separately.
+
+For an expense, **Paid with** can be Cash, Debit, Credit or Pay Later. Selecting Credit or Pay Later also requires a matching account. The purchase remains one ordinary expense and raises that account's amount owed. A later **Payment** lowers the amount owed and records cash leaving on the payment date. The repayment is labelled separately and excluded from ordinary spending totals, preventing the purchase and repayment from being counted as two expenses. Interest, advice and provider-specific rules are deliberately out of scope.
+
 ## API
 
-Interactive local API documentation is at [http://localhost:8765/api/docs](http://localhost:8765/api/docs). Principal endpoints cover transactions, recurring rules, 30-day projections, occurrence recording/skipping, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
+Interactive local API documentation is at [http://localhost:8765/api/docs](http://localhost:8765/api/docs). Principal endpoints cover transactions, recurring rules, 30-day and calendar projections, occurrence recording/skipping, credit facilities and payments, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
 
 Inputs are validated with Pydantic, SQL uses parameters, user text is escaped in the browser, CORS is not enabled, and the database file is not served. No secrets are stored. LAN mode has no account system, so it must only be used on a trusted private network.
 
