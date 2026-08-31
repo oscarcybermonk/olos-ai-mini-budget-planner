@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: olos-ai-mini-budget-planner
+    runtime: python
+    plan: free
+    region: singapore
+    repo: https://github.com/oscarcybermonk/olos-ai-mini-budget-planner
+    branch: hackathon/webmcp
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /api/health
+    envVars:
+      - key: OLOS_DEMO_MODE
+        value: "true"
+      - key: OLOS_DEMO_DATA_DIR
+        value: /tmp/olos-budget-demo
+      - key: PYTHON_VERSION
+        value: 3.11.11

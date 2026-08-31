@@ -38,6 +38,7 @@ test('registers a compact meaningful tool surface with strict schemas and annota
   }
   assert.equal(h.registered.find(t=>t.name==='get_budget_summary').annotations.readOnlyHint,true);
   assert.equal(h.registered.find(t=>t.name==='delete_transaction').inputSchema.properties.confirmation.const,'DELETE');
+  assert.equal(typeof h.unregister,'function');
   assert.match(h.status.innerHTML,/11 structured tools/);
 });
 

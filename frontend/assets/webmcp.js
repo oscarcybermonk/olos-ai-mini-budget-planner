@@ -50,7 +50,9 @@
   // Browser hosts call execute as a callback, so bind each implementation to
   // its definition rather than relying on host-specific `this` behaviour.
   for(const tool of tools)tool.execute=tool.execute.bind(tool);
-  async function register(){const status=document.querySelector('#webmcp-status');if(!document.modelContext?.registerTool)return[];const controller=new AbortController();const registrations=await Promise.all(tools.map(tool=>document.modelContext.registerTool(tool,{signal:controller.signal})));if(status){status.classList.add('ready');status.innerHTML=`<span aria-hidden="true"></span> WebMCP ready · ${tools.length} structured tools`}return registrations}
+  let registrationController;
+  async function register(){const status=document.querySelector('#webmcp-status');if(!document.modelContext?.registerTool)return[];registrationController?.abort();registrationController=new AbortController();const registrations=await Promise.all(tools.map(tool=>document.modelContext.registerTool(tool,{signal:registrationController.signal})));if(status){status.classList.add('ready');status.innerHTML=`<span aria-hidden="true"></span> WebMCP ready · ${tools.length} structured tools`}return registrations}
+  function unregister(){registrationController?.abort();registrationController=undefined}
   const ready=typeof document==='undefined'?Promise.resolve([]):register().catch(error=>{console.warn('WebMCP registration was unavailable:',error);return[]});
-  window.OlosWebMCP={tools,ready,amountToMinor,validDate};
+  window.OlosWebMCP={tools,ready,register,unregister,amountToMinor,validDate};
 })();

@@ -64,6 +64,9 @@ class BudgetApiTests(unittest.TestCase):
         settings={'OLOS_DEMO_MODE':'true','OLOS_DEMO_DATA_DIR':str(demo_dir)}
         with patch.dict(os.environ,settings,clear=False):
             with TestClient(app) as first, TestClient(app) as second:
+                health=first.get('/api/health')
+                self.assertEqual(health.json()['storage'],'session-isolated-demo')
+                self.assertNotIn('olos_demo_session',health.cookies)
                 self.assertEqual(first.get('/api/runtime').json(),{'mode':'demo','disposable':True,'currency':'AUD'})
                 self.assertEqual(len(first.get('/api/transactions').json()),3)
                 self.assertEqual(len(second.get('/api/transactions').json()),3)
@@ -74,7 +77,8 @@ class BudgetApiTests(unittest.TestCase):
                 reset=first.post('/api/reset',json={'confirmation':'RESET'})
                 self.assertEqual(reset.json(),{'reset':True,'demo_reseeded':True})
                 self.assertEqual(len(first.get('/api/transactions').json()),3)
-                self.assertEqual(len(list(demo_dir.glob('*.sqlite3'))),2)
+                session_files=[path for path in demo_dir.glob('*.sqlite3') if not path.name.startswith('_')]
+                self.assertEqual(len(session_files),2)
         with db.connect() as local:
             self.assertEqual(local.execute('SELECT COUNT(*) FROM transactions').fetchone()[0],0)
 

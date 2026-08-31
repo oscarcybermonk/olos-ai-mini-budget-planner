@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .db import APP_ROOT, DEFAULT_CATEGORIES, connect, init_db, reset_request_db_path, set_request_db_path, transaction
-from .demo import DEMO_COOKIE, cleanup_stale_sessions, demo_mode_enabled, new_session_id, seed_demo_data, session_db_path, valid_session_id
+from .demo import DEMO_COOKIE, cleanup_stale_sessions, demo_data_dir, demo_mode_enabled, new_session_id, seed_demo_data, session_db_path, valid_session_id
 from .domain import daily_simple_interest_minor, parse_transaction_text, projected_dates
 from .schemas import BackupIn, CreditFacilityIn, CreditPaymentIn, LoanBalanceIn, RecordOccurrenceIn, RecurringIn, ResetDataIn, TransactionIn, VoiceIn
 
@@ -28,6 +28,17 @@ async def isolate_hosted_demo_session(request: Request, call_next):
     """Give each hosted demo browser an opaque, disposable SQLite database."""
     if not demo_mode_enabled():
         return await call_next(request)
+    if request.url.path == "/api/health":
+        # Hosting probes do not retain cookies. Use one stable, unseeded DB so a
+        # new synthetic session file is not created on every health check.
+        health_path = demo_data_dir() / "_health.sqlite3"
+        token = set_request_db_path(health_path)
+        try:
+            if not health_path.exists():
+                init_db()
+            return await call_next(request)
+        finally:
+            reset_request_db_path(token)
     session_id = valid_session_id(request.cookies.get(DEMO_COOKIE))
     new_session = session_id is None
     session_id = session_id or new_session_id()
