@@ -14,12 +14,40 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .db import APP_ROOT, DB_PATH, DEFAULT_CATEGORIES, connect, init_db, transaction
+from .db import APP_ROOT, DEFAULT_CATEGORIES, connect, init_db, reset_request_db_path, set_request_db_path, transaction
+from .demo import DEMO_COOKIE, cleanup_stale_sessions, demo_mode_enabled, new_session_id, seed_demo_data, session_db_path, valid_session_id
 from .domain import daily_simple_interest_minor, parse_transaction_text, projected_dates
 from .schemas import BackupIn, CreditFacilityIn, CreditPaymentIn, LoanBalanceIn, RecordOccurrenceIn, RecurringIn, ResetDataIn, TransactionIn, VoiceIn
 
 app = FastAPI(title="Olos Personal Budget Tracker", version="1.0.0", docs_url="/api/docs", redoc_url=None)
 STATIC_DIR = APP_ROOT / "frontend"
+
+
+@app.middleware("http")
+async def isolate_hosted_demo_session(request: Request, call_next):
+    """Give each hosted demo browser an opaque, disposable SQLite database."""
+    if not demo_mode_enabled():
+        return await call_next(request)
+    session_id = valid_session_id(request.cookies.get(DEMO_COOKIE))
+    new_session = session_id is None
+    session_id = session_id or new_session_id()
+    if new_session:
+        cleanup_stale_sessions()
+    path = session_db_path(session_id)
+    token = set_request_db_path(path)
+    try:
+        if not path.exists():
+            init_db()
+            seed_demo_data()
+        response = await call_next(request)
+        if new_session:
+            response.set_cookie(DEMO_COOKIE, session_id, max_age=86_400, httponly=True,
+                                secure=request.url.scheme == "https", samesite="lax")
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+    finally:
+        reset_request_db_path(token)
 
 
 def row_dict(row):
@@ -31,7 +59,8 @@ def row_dict(row):
 
 @app.on_event("startup")
 def startup():
-    init_db()
+    if not demo_mode_enabled():
+        init_db()
 
 
 @app.exception_handler(RequestValidationError)
@@ -62,7 +91,14 @@ async def unexpected_error(_request: Request, exc: Exception):
 @app.get("/api/health")
 def health():
     with connect() as db: db.execute("SELECT 1").fetchone()
-    return {"status": "ok", "currency": "AUD", "database": str(DB_PATH)}
+    storage = "session-isolated-demo" if demo_mode_enabled() else "local-sqlite"
+    return {"status": "ok", "currency": "AUD", "storage": storage}
+
+
+@app.get("/api/runtime")
+def runtime():
+    demo = demo_mode_enabled()
+    return {"mode": "demo" if demo else "local", "disposable": demo, "currency": "AUD"}
 
 
 @app.get("/api/categories")
@@ -142,11 +178,35 @@ def apply_facility_effect(db, transaction_record, direction: int) -> None:
 
 
 @app.get("/api/transactions")
-def list_transactions(limit: int = Query(30, ge=1, le=200), month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$")):
-    sql, params = "SELECT * FROM transactions", []
-    if month: sql += " WHERE substr(transaction_date,1,7)=?"; params.append(month)
+def list_transactions(
+    limit: int = Query(30, ge=1, le=200),
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    from_date: date | None = None,
+    to_date: date | None = None,
+    transaction_type: str | None = Query(None, pattern=r"^(expense|income|bill|savings)$"),
+    category: str | None = Query(None, min_length=1, max_length=80),
+):
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(422, "Start date must not be after end date")
+    clauses, params = [], []
+    if month: clauses.append("substr(transaction_date,1,7)=?"); params.append(month)
+    if from_date: clauses.append("transaction_date>=?"); params.append(from_date.isoformat())
+    if to_date: clauses.append("transaction_date<=?"); params.append(to_date.isoformat())
+    if transaction_type: clauses.append("transaction_type=?"); params.append(transaction_type)
+    if category: clauses.append("lower(category)=lower(?)"); params.append(category.strip())
+    sql = "SELECT * FROM transactions"
+    if clauses: sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY transaction_date DESC, id DESC LIMIT ?"; params.append(limit)
     with connect() as db: return [row_dict(row) for row in db.execute(sql, params)]
+
+
+@app.get("/api/transactions/{transaction_id}")
+def get_transaction(transaction_id: int):
+    with connect() as db:
+        item = db.execute("SELECT * FROM transactions WHERE id=?", (transaction_id,)).fetchone()
+    if not item:
+        raise HTTPException(404, "Transaction not found")
+    return row_dict(item)
 
 
 @app.post("/api/transactions", status_code=201)
@@ -472,9 +532,12 @@ def reset_all_data(payload: ResetDataIn):
         db.execute("DELETE FROM idempotency_keys")
         db.execute("DELETE FROM import_history")
         db.execute("DELETE FROM categories")
+        if demo_mode_enabled():
+            db.execute("DELETE FROM demo_state")
         for kind, names in DEFAULT_CATEGORIES.items():
             db.executemany("INSERT INTO categories(name,transaction_type) VALUES (?,?)", [(name, kind) for name in names])
-    return {"reset": True}
+    seeded = seed_demo_data() if demo_mode_enabled() else False
+    return {"reset": True, "demo_reseeded": seeded}
 
 
 if STATIC_DIR.exists():

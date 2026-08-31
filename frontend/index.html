@@ -31,7 +31,7 @@
 
   <main class="shell">
     <section aria-labelledby="snapshot-heading">
-      <div class="section-heading"><div><p class="eyebrow">Monthly snapshot</p><h1 id="snapshot-heading">Your money, at a glance</h1></div><p class="privacy-note"><span></span> Stored on this device</p></div>
+      <div class="section-heading"><div><p class="eyebrow">Monthly snapshot</p><h1 id="snapshot-heading">Your money, at a glance</h1></div><p id="runtime-note" class="privacy-note"><span></span> Stored on this device</p></div>
       <div class="snapshot" id="snapshot" aria-live="polite"></div>
       <div id="liability-strip" class="liability-strip" aria-label="Credit and liability position" hidden></div>
     </section>
@@ -79,6 +79,8 @@
     <details class="data-tools">
       <summary>Data and backup tools</summary>
       <p>Your live database stays in the documented local <code>data</code> folder. Restoring a backup replaces current records and rejects the same backup if submitted twice.</p>
+      <p id="demo-mode-note" class="help-text" hidden>This hosted demo uses synthetic data in an isolated, disposable browser session. Reset restores the safe demo story.</p>
+      <p id="webmcp-status" class="webmcp-status" role="status"><span aria-hidden="true"></span> WebMCP unavailable in this browser</p>
       <div class="data-actions"><a class="file-button" href="/api/export.json">Create JSON backup</a><label class="file-button">Restore JSON backup<input id="restore-file" type="file" accept="application/json,.json"></label><button id="open-reset" class="danger-button" type="button">Reset all data</button></div>
     </details>
   </main>
@@ -155,6 +157,7 @@
     </form>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js?v=6" defer></script>
+  <script src="/assets/app.js?v=7" defer></script>
+  <script src="/assets/webmcp.js?v=1" defer></script>
 </body>
 </html>

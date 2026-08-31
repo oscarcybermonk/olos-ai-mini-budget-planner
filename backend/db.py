@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextvars import ContextVar, Token
 from contextlib import contextmanager
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.environ.get("OLOS_BUDGET_DATA_DIR", APP_ROOT / "data"))
 DB_PATH = DATA_DIR / "olos-mini-budget.sqlite3"
+_REQUEST_DB_PATH: ContextVar[Path | None] = ContextVar("olos_budget_request_db_path", default=None)
 
 DEFAULT_CATEGORIES = {
     "expense": ["Groceries", "Dining", "Fuel", "Transport", "Housing", "Utilities", "Phone/Internet", "Subscriptions", "Health", "Shopping", "Entertainment", "Travel", "Work", "Business", "Olos-AI", "Other"],
@@ -25,9 +27,22 @@ class ClosingConnection(sqlite3.Connection):
             self.close()
 
 
+def current_db_path() -> Path:
+    return _REQUEST_DB_PATH.get() or DB_PATH
+
+
+def set_request_db_path(path: Path) -> Token:
+    return _REQUEST_DB_PATH.set(path)
+
+
+def reset_request_db_path(token: Token) -> None:
+    _REQUEST_DB_PATH.reset(token)
+
+
 def connect() -> sqlite3.Connection:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH, timeout=10, factory=ClosingConnection)
+    path = current_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, timeout=10, factory=ClosingConnection)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA journal_mode = WAL")

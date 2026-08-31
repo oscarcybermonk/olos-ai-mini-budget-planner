@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -47,6 +49,34 @@ class BudgetApiTests(unittest.TestCase):
         item=first.json(); changed=self.client.put(f"/api/transactions/{item['id']}",json=self.transaction(amount_minor=2301)); self.assertEqual(changed.json()['amount_minor'],2301)
         self.assertEqual(self.client.delete(f"/api/transactions/{item['id']}").status_code,204)
         self.assertEqual(self.client.get('/api/transactions').json(),[])
+
+    def test_single_transaction_read_and_bounded_filters(self):
+        first=self.client.post('/api/transactions',json=self.transaction(description='Work fuel',category='Olos-AI',transaction_date='2026-08-10')).json()
+        self.client.post('/api/transactions',json=self.transaction(transaction_type='income',description='Pay',category='Salary',transaction_date='2026-09-01'))
+        self.assertEqual(self.client.get(f"/api/transactions/{first['id']}").json()['description'],'Work fuel')
+        filtered=self.client.get('/api/transactions?from_date=2026-08-01&to_date=2026-08-31&transaction_type=expense&category=olos-ai&limit=10')
+        self.assertEqual([item['id'] for item in filtered.json()],[first['id']])
+        self.assertEqual(self.client.get('/api/transactions?from_date=2026-09-02&to_date=2026-09-01').status_code,422)
+        self.assertEqual(self.client.get('/api/transactions/999999').status_code,404)
+
+    def test_demo_mode_isolates_sessions_reseeds_reset_and_leaves_local_db_untouched(self):
+        demo_dir=Path(self.temp.name)/'demo-sessions'
+        settings={'OLOS_DEMO_MODE':'true','OLOS_DEMO_DATA_DIR':str(demo_dir)}
+        with patch.dict(os.environ,settings,clear=False):
+            with TestClient(app) as first, TestClient(app) as second:
+                self.assertEqual(first.get('/api/runtime').json(),{'mode':'demo','disposable':True,'currency':'AUD'})
+                self.assertEqual(len(first.get('/api/transactions').json()),3)
+                self.assertEqual(len(second.get('/api/transactions').json()),3)
+                created=first.post('/api/transactions',json=self.transaction(description='First browser only',transaction_date=date.today().isoformat()))
+                self.assertEqual(created.status_code,201,created.text)
+                self.assertEqual(len(first.get('/api/transactions').json()),4)
+                self.assertEqual(len(second.get('/api/transactions').json()),3)
+                reset=first.post('/api/reset',json={'confirmation':'RESET'})
+                self.assertEqual(reset.json(),{'reset':True,'demo_reseeded':True})
+                self.assertEqual(len(first.get('/api/transactions').json()),3)
+                self.assertEqual(len(list(demo_dir.glob('*.sqlite3'))),2)
+        with db.connect() as local:
+            self.assertEqual(local.execute('SELECT COUNT(*) FROM transactions').fetchone()[0],0)
 
     def test_money_precision(self):
         self.assertEqual(money_to_minor('83.47'),8347); self.assertEqual(money_to_minor('0.005'),1)
