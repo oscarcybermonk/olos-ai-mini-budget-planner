@@ -17,36 +17,52 @@ def money_to_minor(value: str | Decimal) -> int:
     return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def advance_day(day: date, frequency: str) -> date:
+def daily_simple_interest_minor(balance_minor: int, annual_rate_basis_points: int | None, days: int) -> int:
+    """Estimated simple interest: balance x (APR basis points / 10,000) x days / 365.
+
+    Money stays in integer minor units and the final interest is rounded half-up
+    to the nearest cent. No interest is accrued for zero/negative day spans.
+    """
+    if balance_minor <= 0 or not annual_rate_basis_points or days <= 0:
+        return 0
+    interest = (Decimal(balance_minor) * Decimal(annual_rate_basis_points) * Decimal(days)) / (Decimal(10_000) * Decimal(365))
+    return int(interest.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def advance_day(day: date, frequency: str, interval_count: int = 1) -> date:
+    if interval_count < 1:
+        raise ValueError("Recurring interval must be at least one")
     if frequency == "weekly":
-        return day + timedelta(days=7)
+        return day + timedelta(days=7 * interval_count)
     if frequency == "fortnightly":
-        return day + timedelta(days=14)
-    months = 12 if frequency == "yearly" else 1
+        return day + timedelta(days=14 * interval_count)
+    months = (12 if frequency == "yearly" else 1) * interval_count
     month_index = day.month - 1 + months
     year, month = day.year + month_index // 12, month_index % 12 + 1
     return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
-def occurrence_at(anchor: date, frequency: str, index: int) -> date:
-    if frequency == "weekly": return anchor + timedelta(days=7 * index)
-    if frequency == "fortnightly": return anchor + timedelta(days=14 * index)
-    months = (12 if frequency == "yearly" else 1) * index
+def occurrence_at(anchor: date, frequency: str, index: int, interval_count: int = 1) -> date:
+    if interval_count < 1:
+        raise ValueError("Recurring interval must be at least one")
+    if frequency == "weekly": return anchor + timedelta(days=7 * interval_count * index)
+    if frequency == "fortnightly": return anchor + timedelta(days=14 * interval_count * index)
+    months = (12 if frequency == "yearly" else 1) * interval_count * index
     month_index = anchor.month - 1 + months
     year, month = anchor.year + month_index // 12, month_index % 12 + 1
     return date(year, month, min(anchor.day, calendar.monthrange(year, month)[1]))
 
 
-def projected_dates(start: date, frequency: str, window_start: date, window_end: date, end: date | None = None) -> Iterable[date]:
+def projected_dates(start: date, frequency: str, window_start: date, window_end: date, end: date | None = None, interval_count: int = 1) -> Iterable[date]:
     guard = 0; current = start
     while current < window_start:
         guard += 1
         if guard > 10000:
             raise ValueError("Recurring schedule is too large")
-        current = occurrence_at(start, frequency, guard)
+        current = occurrence_at(start, frequency, guard, interval_count)
     while current <= window_end and (end is None or current <= end):
         yield current
-        guard += 1; current = occurrence_at(start, frequency, guard)
+        guard += 1; current = occurrence_at(start, frequency, guard, interval_count)
 
 
 NUMBER_WORDS = {

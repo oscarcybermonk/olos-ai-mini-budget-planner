@@ -1,4 +1,4 @@
-# Olos-AI Mini Budget Planner
+# Olos Personal Budget Tracker
 
 A small, local-first personal budget and cashflow planner for one person. It records income, expenses, bills and savings; projects recurring commitments; optionally tracks simple credit/pay-later balances; and shows what is approximately available after known plans. It is not accounting, tax, banking, investing or financial-advice software.
 
@@ -32,7 +32,7 @@ From PowerShell in this folder:
 .\run.ps1
 ```
 
-Or double-click `run.bat`. The first run creates a private `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8765](http://localhost:8765). Stop it with `Ctrl+C`.
+Or double-click `run.bat`. The first run creates a private `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8765](http://localhost:8765). Stop it with `Ctrl+C`. Run `install-desktop-shortcut.ps1` once to create the **Olos Personal Budget Tracker** desktop launcher; it starts the local server and opens the app automatically.
 
 No sample financial transactions are created.
 
@@ -73,6 +73,7 @@ expected remaining =
   - actual cash/debit expenses
   - actual paid bills
   - actual credit/pay-later repayments
+  - actual fixed-loan repayments
   - unrecorded planned bills
   - actual savings
   - unrecorded planned savings
@@ -80,11 +81,20 @@ expected remaining =
 
 Recorded and skipped recurring occurrences are excluded from the planned totals, preventing double counting. Schedule definitions are projected as needed; thousands of future rows are not generated.
 
-## Credit and Pay Later
+## Credit, Pay Later and Fixed Loans
 
-The collapsed **Credit & Pay Later** section is optional. Each account stores its name, kind, limit, current amount owed and an optional note. Available credit is always calculated as `limit - owed`; it is not stored separately.
+The collapsed **Credit, Pay Later & Loans** section is optional. Revolving accounts store a limit and current amount owed; available credit is always calculated as `limit - owed` and is not stored separately. Their optional APR is display-only because statement cycles and lender rules vary.
 
-For an expense, **Paid with** can be Cash, Debit, Credit or Pay Later. Selecting Credit or Pay Later also requires a matching account. The purchase remains one ordinary expense and raises that account's amount owed. A later **Payment** lowers the amount owed and records cash leaving on the payment date. The repayment is labelled separately and excluded from ordinary spending totals, preventing the purchase and repayment from being counted as two expenses. Interest, advice and provider-specific rules are deliberately out of scope.
+For an expense, **Paid with** can be Cash, Debit, Credit or Pay Later. Selecting Credit or Pay Later also requires a matching account. The purchase remains one ordinary expense and raises that account's amount owed. A later **Payment** lowers the amount owed and records cash leaving on the payment date. The repayment is labelled separately and excluded from ordinary spending totals, preventing the purchase and repayment from being counted as two expenses.
+
+A Fixed Loan stores an estimated balance, annual rate, balance date and optional link to one recurring bill. On a recorded payment, estimated daily simple interest is applied first:
+
+```text
+interest cents = round-half-up(balance cents × APR basis points × elapsed days ÷ (10,000 × 365))
+new estimated balance = prior balance + interest - payment
+```
+
+Interest increases only the liability estimate; it does not create a cash expense. The one repayment transaction reduces cashflow once and reduces the linked loan once. **Edit balance** lets the lender's authoritative balance replace the estimate without adding a pseudo-expense. Fees, amortisation advice and lender-specific calculations remain out of scope.
 
 ## API
 

@@ -5,13 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#163c34">
   <meta name="description" content="A calm, local-first personal budget and cashflow planner.">
+  <link rel="icon" href="/assets/olos-personal-budget.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/app.css?v=2">
-  <title>Olos-AI Mini Budget Planner</title>
+  <link rel="stylesheet" href="/assets/app.css?v=6">
+  <title>Olos Personal Budget Tracker</title>
+  <script>
+    if (window.location.protocol === 'file:') {
+      window.addEventListener('DOMContentLoaded', () => {
+        document.body.innerHTML = '<main style="max-width:620px;margin:12vh auto;padding:32px;font:16px/1.55 Segoe UI,sans-serif;color:#173329"><h1 style="margin-bottom:10px">Use the Olos desktop launcher</h1><p>This HTML file is only part of the application and cannot load your local data by itself.</p><p>Double-click <strong>Olos Personal Budget Tracker</strong> on the Windows desktop. The launcher starts the private local server and opens the working app.</p><p><a href="http://localhost:8765" style="color:#176b45;font-weight:700">Open the app if the launcher is already running</a></p></main>';
+      });
+    }
+  </script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">O</span><div><strong>Olos-AI</strong><span>Mini Budget Planner</span></div></div>
+    <div class="brand" aria-label="Olos Personal Budget Tracker"><img class="brand-mark" src="/assets/olos-ecosystem-logo-128.png" alt=""><div><strong>OLOS AI</strong><span>Personal Budget Tracker</span></div></div>
     <div class="period-controls" aria-label="Selected month">
       <button id="previous-month" class="icon-button" aria-label="Previous month">‹</button>
       <button id="current-month" class="period-label" aria-haspopup="dialog" title="Open month calendar"></button>
@@ -24,6 +33,7 @@
     <section aria-labelledby="snapshot-heading">
       <div class="section-heading"><div><p class="eyebrow">Monthly snapshot</p><h1 id="snapshot-heading">Your money, at a glance</h1></div><p class="privacy-note"><span></span> Stored on this device</p></div>
       <div class="snapshot" id="snapshot" aria-live="polite"></div>
+      <div id="liability-strip" class="liability-strip" aria-label="Credit and liability position" hidden></div>
     </section>
 
     <div class="main-grid">
@@ -51,6 +61,7 @@
       <aside class="panel upcoming-panel" aria-labelledby="upcoming-heading">
         <div class="panel-heading"><div><p class="eyebrow">Next 30 days</p><h2 id="upcoming-heading">Upcoming</h2></div><button id="add-recurring" class="small-button">+ Recurring</button></div>
         <div id="upcoming-list" class="stack-list"></div>
+        <button id="manage-recurring" class="manage-button" type="button">Manage recurring rules</button>
       </aside>
     </div>
 
@@ -60,29 +71,38 @@
     </section>
 
     <details id="credit-section" class="credit-section">
-      <summary><span>Credit &amp; Pay Later <small id="facility-count"></small></span><span aria-hidden="true">⌄</span></summary>
-      <div class="credit-heading"><p>Optional balance tracking. Purchases stay expenses; repayments affect cashflow once.</p><button id="add-facility" class="small-button">+ Add account</button></div>
+      <summary><span>Credit, Pay Later &amp; Loans <small id="facility-count"></small></span><span aria-hidden="true">⌄</span></summary>
+      <div class="credit-heading"><p>Optional liability tracking. Repayments affect cashflow once and never become ordinary spending.</p><button id="add-facility" class="small-button">+ Add account</button></div>
       <div id="facility-list" class="facility-list"></div>
     </details>
 
     <details class="data-tools">
       <summary>Data and backup tools</summary>
       <p>Your live database stays in the documented local <code>data</code> folder. Restoring a backup replaces current records and rejects the same backup if submitted twice.</p>
-      <label class="file-button">Choose JSON backup<input id="restore-file" type="file" accept="application/json,.json"></label>
+      <div class="data-actions"><a class="file-button" href="/api/export.json">Create JSON backup</a><label class="file-button">Restore JSON backup<input id="restore-file" type="file" accept="application/json,.json"></label><button id="open-reset" class="danger-button" type="button">Reset all data</button></div>
     </details>
   </main>
 
   <dialog id="recurring-dialog">
     <form id="recurring-form" method="dialog">
-      <div class="dialog-heading"><div><p class="eyebrow">Plan ahead</p><h2>Add recurring item</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <input id="recurring-id" type="hidden">
+      <div class="dialog-heading"><div><p class="eyebrow">Plan ahead</p><h2 id="recurring-dialog-title">Add recurring item</h2></div><button class="icon-button form-close" type="button" aria-label="Close">×</button></div>
       <div class="type-tabs" role="group" aria-label="Recurring item type"><button type="button" class="recurring-tab active" data-type="bill">Bill</button><button type="button" class="recurring-tab" data-type="income">Income</button><button type="button" class="recurring-tab" data-type="savings">Savings</button></div>
-      <div class="form-row"><label>Amount <span class="amount-input"><span>$</span><input id="recurring-amount" inputmode="decimal" required></span></label><label>Frequency <select id="frequency"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="yearly">Yearly</option></select></label></div>
+      <div class="form-row"><label>Amount <span class="amount-input"><span>$</span><input id="recurring-amount" inputmode="decimal" required></span></label><label>Repeat every <span class="interval-input"><input id="interval-count" type="number" min="1" max="120" step="1" value="1" inputmode="numeric" required aria-label="Repeat interval"><select id="frequency" aria-label="Repeat unit"><option value="weekly">Weeks</option><option value="monthly" selected>Months</option><option value="yearly">Years</option></select></span></label></div>
       <label>Description <input id="recurring-description" maxlength="160" required placeholder="e.g. Electricity"></label>
-      <div class="form-row"><label>Category <input id="recurring-category" list="category-list" required></label><label>Next due <input id="next-due" type="date" required></label></div>
+      <div class="form-row"><label>Category or tag <input id="recurring-category" list="category-list" required></label><label>Next due <input id="next-due" type="date" required></label></div>
+      <div class="form-row"><label>End date <input id="recurring-end" type="date"></label><label id="recurring-loan-label">Linked fixed loan <select id="recurring-loan"><option value="">None</option></select></label></div>
+      <label>Note <input id="recurring-note" maxlength="1000" placeholder="Optional"></label>
       <label class="check-label"><input id="automated" type="checkbox"> This payment or transfer is already automated elsewhere</label>
+      <label class="check-label"><input id="recurring-active" type="checkbox" checked> Active</label>
       <p class="help-text">This planner tracks the schedule. It never moves money.</p>
-      <button class="primary-button wide" type="submit">Add recurring item</button>
+      <button id="recurring-save" class="primary-button wide" type="submit">Add recurring item</button>
     </form>
+  </dialog>
+  <dialog id="recurring-list-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">Future plans</p><h2>Recurring rules</h2></div><button class="icon-button dialog-close" aria-label="Close recurring rules">×</button></div>
+    <p class="help-text">Edit changes future projections only. Delete stops future occurrences and preserves recorded history.</p>
+    <div id="recurring-rule-list" class="rule-list"></div>
   </dialog>
   <dialog id="calendar-dialog" class="calendar-dialog">
     <div class="dialog-heading"><div><p class="eyebrow">Planned money</p><h2 id="calendar-title">Month</h2></div><button class="icon-button dialog-close" aria-label="Close calendar">×</button></div>
@@ -93,18 +113,40 @@
   </dialog>
   <dialog id="facility-dialog">
     <form id="facility-form" method="dialog" novalidate>
-      <div class="dialog-heading"><div><p class="eyebrow">Optional tracking</p><h2>Add credit account</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <input id="facility-id" type="hidden">
+      <div class="dialog-heading"><div><p class="eyebrow">Optional tracking</p><h2 id="facility-dialog-title">Add account</h2></div><button class="icon-button form-close" type="button" aria-label="Close">×</button></div>
       <label>Account name <input id="facility-name" maxlength="100" placeholder="e.g. Main credit card"></label>
-      <div class="form-row"><label>Type <select id="facility-type"><option value="credit">Credit</option><option value="pay_later">Pay Later</option></select></label><label>Credit limit <span class="amount-input"><span>$</span><input id="facility-limit" inputmode="decimal" placeholder="0.00"></span></label></div>
+      <div class="form-row"><label>Type <select id="facility-type"><option value="credit">Credit</option><option value="pay_later">Pay Later</option><option value="fixed_loan">Fixed Loan</option></select></label><label id="facility-limit-label">Credit limit <span class="amount-input"><span>$</span><input id="facility-limit" inputmode="decimal" placeholder="0.00"></span></label></div>
       <label>Current amount owed <span class="amount-input"><span>$</span><input id="facility-owed" inputmode="decimal" value="0.00"></span></label>
+      <div class="form-row"><label>Annual interest rate / APR <span class="rate-input"><input id="facility-rate" inputmode="decimal" placeholder="0.00"><span>%</span></span></label><label id="facility-date-label">Balance as of <input id="facility-date" type="date"></label></div>
+      <label id="facility-rule-label">Linked recurring payment <select id="facility-rule" aria-describedby="facility-rule-help"><option value="">None — link later</option></select><small id="facility-rule-help" class="field-hint">Optional. Save the loan now, then link it here or while editing a recurring bill.</small></label>
       <label>Note <input id="facility-note" maxlength="1000" placeholder="Optional"></label>
-      <button class="primary-button wide" type="submit">Add account</button>
+      <p id="rate-help" class="help-text">APR is display-only for Credit and Pay Later accounts.</p>
+      <button id="facility-save" class="primary-button wide" type="submit">Add account</button>
+    </form>
+  </dialog>
+  <dialog id="balance-dialog">
+    <form id="balance-form" method="dialog" novalidate>
+      <input id="balance-facility-id" type="hidden">
+      <div class="dialog-heading"><div><p class="eyebrow">Authoritative correction</p><h2 id="balance-title">Edit loan balance</h2></div><button class="icon-button form-close" type="button" aria-label="Close">×</button></div>
+      <p class="help-text">Enter the lender's current balance. This adjusts the estimate without creating a cashflow transaction.</p>
+      <div class="form-row"><label>Amount owing <span class="amount-input"><span>$</span><input id="balance-amount" inputmode="decimal"></span></label><label>Balance date <input id="balance-date" type="date"></label></div>
+      <label>Note <input id="balance-note" maxlength="1000" placeholder="Optional"></label>
+      <button class="primary-button wide" type="submit">Save authoritative balance</button>
+    </form>
+  </dialog>
+  <dialog id="reset-dialog">
+    <form id="reset-form" method="dialog" novalidate>
+      <div class="dialog-heading"><div><p class="eyebrow danger-text">Protected action</p><h2>Reset all data</h2></div><button class="icon-button form-close" type="button" aria-label="Close">×</button></div>
+      <p>This permanently removes transactions, recurring rules, facilities and balances from this local app. Create a JSON backup first if you may need them later.</p>
+      <label>Type <strong>RESET</strong> to continue <input id="reset-confirmation" autocomplete="off"></label>
+      <button id="reset-submit" class="danger-button wide" type="submit" disabled>Reset all data</button>
     </form>
   </dialog>
   <dialog id="payment-dialog">
     <form id="payment-form" method="dialog" novalidate>
       <input id="payment-facility-id" type="hidden">
-      <div class="dialog-heading"><div><p class="eyebrow">Record cashflow</p><h2 id="payment-title">Account payment</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">Record cashflow</p><h2 id="payment-title">Account payment</h2></div><button class="icon-button form-close" type="button" aria-label="Close">×</button></div>
       <p id="payment-balance" class="dialog-summary"></p>
       <div class="form-row"><label>Payment amount <span class="amount-input"><span>$</span><input id="payment-amount" inputmode="decimal" placeholder="0.00"></span></label><label>Date <input id="payment-date" type="date"></label></div>
       <label>Note <input id="payment-note" maxlength="1000" placeholder="Optional"></label>
@@ -113,6 +155,6 @@
     </form>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js?v=2" defer></script>
+  <script src="/assets/app.js?v=6" defer></script>
 </body>
 </html>

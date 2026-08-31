@@ -1,1 +1,1 @@
-"""Olos-AI Mini Budget Planner backend."""
+"""Olos Personal Budget Tracker backend."""

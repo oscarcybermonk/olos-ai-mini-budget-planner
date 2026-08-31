@@ -1,6 +1,7 @@
 param(
     [switch]$Lan,
-    [int]$Port = 8765
+    [int]$Port = 8765,
+    [switch]$OpenBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 
 $hostAddress = if ($Lan) { '0.0.0.0' } else { '127.0.0.1' }
 Write-Host ''
-Write-Host 'Olos-AI Mini Budget Planner'
+Write-Host 'Olos Personal Budget Tracker'
 Write-Host "Desktop: http://localhost:$Port"
 if ($Lan) {
     $localAddress = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue |
@@ -27,4 +28,8 @@ if ($Lan) {
     Write-Host 'Localhost-only mode. Use .\run.ps1 -Lan for explicit trusted-network access.'
 }
 Write-Host ''
-& $venvPython -m uvicorn backend.main:app --host $hostAddress --port $Port
+if ($OpenBrowser) {
+    $readyScript = Join-Path $projectRoot 'scripts\open-when-ready.ps1'
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$readyScript`"",'-Url',"`"http://localhost:$Port`"") -WindowStyle Hidden
+}
+& $venvPython -m uvicorn backend.main:app --app-dir $projectRoot --host $hostAddress --port $Port

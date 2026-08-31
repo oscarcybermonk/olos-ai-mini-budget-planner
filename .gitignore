@@ -10,6 +10,9 @@
 
 # testing
 /coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
 # next.js
 /.next/
@@ -18,7 +21,22 @@
 
 # misc
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.tmp
+*.temp
+*.bak
+*~
+/.cache/
+/.tmp/
+/tmp/
+/temp/
+/logs/
 
 # debug
 npm-debug.log*
@@ -28,18 +46,42 @@ yarn-error.log*
 
 # local environment
 .env*
+!.env.example
+
+# editors
+/.idea/
+/.vscode/
+*.code-workspace
 
 # deployment and generated files
 .vercel
 next-env.d.ts
 /dist/
+/build/
+/.parcel-cache/
+/.vite/
 /.wrangler/
 /outputs/
 /work/
 
 # local financial data and Python artefacts
 /data/
+/backups/
+/exports/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.backup.json
+*.export.json
+olos-mini-budget-*.csv
 /.venv/
 __pycache__/
 *.py[cod]
-.pytest_cache/
+.mypy_cache/
+.ruff_cache/

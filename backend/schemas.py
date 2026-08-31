@@ -45,12 +45,14 @@ class RecurringIn(BaseModel):
     description: str = Field(min_length=1, max_length=160)
     category: str = Field(min_length=1, max_length=80)
     frequency: Frequency
+    interval_count: int = Field(default=1, ge=1, le=120)
     start_date: date
     next_due_date: date
     end_date: date | None = None
     active: bool = True
     automated_externally: bool = False
     note: str | None = Field(default=None, max_length=1000)
+    linked_fixed_loan_id: int | None = Field(default=None, gt=0)
     @field_validator("description", "category")
     @classmethod
     def strip_recurring(cls, value: str) -> str:
@@ -69,9 +71,12 @@ class RecordOccurrenceIn(BaseModel):
 
 class CreditFacilityIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    facility_type: Literal["credit", "pay_later"]
-    credit_limit_minor: int = Field(gt=0, le=1_000_000_000_00)
+    facility_type: Literal["credit", "pay_later", "fixed_loan"]
+    credit_limit_minor: int | None = Field(default=None, gt=0, le=1_000_000_000_00)
     amount_owed_minor: int = Field(default=0, ge=0, le=1_000_000_000_00)
+    annual_rate_basis_points: int | None = Field(default=None, ge=0, le=100_000)
+    balance_as_of_date: date | None = None
+    linked_recurring_rule_id: int | None = Field(default=None, gt=0)
     currency: str = Field(default="AUD", pattern=r"^[A-Z]{3}$")
     note: str | None = Field(default=None, max_length=1000)
     @field_validator("name")
@@ -81,8 +86,18 @@ class CreditFacilityIn(BaseModel):
         return value.strip()
     @model_validator(mode="after")
     def validate_balance(self):
-        if self.amount_owed_minor > self.credit_limit_minor:
+        if self.facility_type == "fixed_loan":
+            if self.credit_limit_minor is not None:
+                raise ValueError("Fixed loans do not use a credit limit")
+            self.balance_as_of_date = self.balance_as_of_date or date.today()
+        elif self.credit_limit_minor is None:
+            raise ValueError("Enter a credit limit")
+        elif self.amount_owed_minor > self.credit_limit_minor:
             raise ValueError("Amount owed cannot exceed the credit limit")
+        if self.facility_type != "fixed_loan":
+            self.balance_as_of_date = None
+            if self.linked_recurring_rule_id:
+                raise ValueError("Only a fixed loan can link to a recurring payment")
         return self
 
 
@@ -90,6 +105,16 @@ class CreditPaymentIn(BaseModel):
     amount_minor: int = Field(gt=0, le=1_000_000_000_00)
     transaction_date: date
     note: str | None = Field(default=None, max_length=1000)
+
+
+class LoanBalanceIn(BaseModel):
+    amount_owed_minor: int = Field(ge=0, le=1_000_000_000_00)
+    balance_as_of_date: date
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ResetDataIn(BaseModel):
+    confirmation: Literal["RESET"]
 
 
 class BackupIn(BaseModel):
@@ -102,3 +127,4 @@ class BackupIn(BaseModel):
     occurrences: list[dict] = []
     categories: list[dict] = []
     credit_facilities: list[dict] = []
+    loan_balance_events: list[dict] = []

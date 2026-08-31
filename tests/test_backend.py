@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend import db
-from backend.domain import advance_day, money_to_minor, parse_transaction_text, projected_dates
+from backend.domain import advance_day, daily_simple_interest_minor, money_to_minor, parse_transaction_text, projected_dates
 from backend.main import app
 
 
@@ -30,11 +30,15 @@ class BudgetApiTests(unittest.TestCase):
         payload.update(overrides); return payload
 
     def recurring(self, **overrides):
-        payload = {"transaction_type":"bill","amount_minor":8000,"currency":"AUD","description":"Phone","category":"Phone/Internet","frequency":"monthly","start_date":"2026-08-15","next_due_date":"2026-08-15","end_date":None,"active":True,"automated_externally":True,"note":None}
+        payload = {"transaction_type":"bill","amount_minor":8000,"currency":"AUD","description":"Phone","category":"Phone/Internet","frequency":"monthly","interval_count":1,"start_date":"2026-08-15","next_due_date":"2026-08-15","end_date":None,"active":True,"automated_externally":True,"note":None}
         payload.update(overrides); return payload
 
     def facility(self, **overrides):
         payload = {"name":"Main card","facility_type":"credit","credit_limit_minor":800000,"amount_owed_minor":0,"currency":"AUD","note":None}
+        payload.update(overrides); return payload
+
+    def fixed_loan(self, **overrides):
+        payload = {"name":"Car loan","facility_type":"fixed_loan","credit_limit_minor":None,"amount_owed_minor":500000,"annual_rate_basis_points":825,"balance_as_of_date":"2026-08-01","linked_recurring_rule_id":None,"currency":"AUD","note":None}
         payload.update(overrides); return payload
 
     def test_transaction_create_edit_delete_and_idempotency(self):
@@ -69,12 +73,25 @@ class BudgetApiTests(unittest.TestCase):
         self.assertEqual(advance_day(date(2024,2,29),'yearly'),date(2025,2,28))
         days=list(projected_dates(date(2026,1,30),'monthly',date(2026,2,1),date(2026,4,30)))
         self.assertEqual(days,[date(2026,2,28),date(2026,3,30),date(2026,4,30)])
+        self.assertEqual(advance_day(date(2026,1,31),'monthly',2),date(2026,3,31))
+        for interval, expected in ((2,[date(2026,1,31),date(2026,3,31),date(2026,5,31)]),(3,[date(2026,1,31),date(2026,4,30)]),(4,[date(2026,1,31),date(2026,5,31)])):
+            with self.subTest(interval=interval):
+                actual=list(projected_dates(date(2026,1,31),'monthly',date(2026,1,1),date(2026,5,31),interval_count=interval))
+                self.assertEqual(actual,expected)
 
     def test_weekly_and_fortnightly_projection_api(self):
         self.client.post('/api/recurring',json=self.recurring(frequency='weekly',start_date='2026-08-01',next_due_date='2026-08-01'))
         self.client.post('/api/recurring',json=self.recurring(description='Fortnight',frequency='fortnightly',start_date='2026-08-01',next_due_date='2026-08-01'))
         items=self.client.get('/api/upcoming?from_date=2026-08-01&days=28').json()
         self.assertEqual(sum(i['description']=='Phone' for i in items),5); self.assertEqual(sum(i['description']=='Fortnight' for i in items),3)
+
+    def test_custom_recurring_interval_projects_and_validates(self):
+        created=self.client.post('/api/recurring',json=self.recurring(description='Quarterly subscription',interval_count=3,start_date='2026-01-31',next_due_date='2026-01-31'))
+        self.assertEqual(created.status_code,201,created.text); self.assertEqual(created.json()['interval_count'],3)
+        items=self.client.get('/api/upcoming?from_date=2026-01-01&days=150').json()
+        self.assertEqual([item['due_date'] for item in items if item['description']=='Quarterly subscription'],['2026-01-31','2026-04-30'])
+        self.assertEqual(self.client.post('/api/recurring',json=self.recurring(interval_count=0)).status_code,422)
+        self.assertEqual(self.client.post('/api/recurring',json=self.recurring(interval_count=121)).status_code,422)
 
     def test_yearly_leap_projection(self):
         self.client.post('/api/recurring',json=self.recurring(frequency='yearly',start_date='2024-02-29',next_due_date='2024-02-29'))
@@ -146,6 +163,72 @@ class BudgetApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/transactions/{created['id']}").status_code,204); self.assertEqual(self.client.get('/api/credit-facilities').json()[0]['amount_owed_minor'],0)
         self.assertEqual(self.client.delete(f"/api/credit-facilities/{card['id']}").status_code,204)
 
+    def test_fixed_loan_interest_payment_and_no_double_counting(self):
+        self.assertEqual(daily_simple_interest_minor(500000,825,30),3390)
+        loan=self.client.post('/api/credit-facilities',json=self.fixed_loan()).json()
+        rule=self.client.post('/api/recurring',json=self.recurring(amount_minor=73000,description='Car loan payment',category='Loan repayment',linked_fixed_loan_id=loan['id'])).json()
+        payment=self.client.post(f"/api/occurrences/{rule['id']}/2026-08-15/record",json={'transaction_date':'2026-08-31'})
+        self.assertEqual(payment.status_code,201,payment.text); self.assertEqual(payment.json()['transaction_role'],'loan_payment')
+        updated=self.client.get('/api/credit-facilities').json()[0]
+        self.assertEqual(updated['amount_owed_minor'],430390); self.assertIsNone(updated['available_credit_minor'])
+        summary=self.client.get('/api/summary/2026-08').json()
+        self.assertEqual(summary['actual_loan_payments'],73000); self.assertEqual(summary['actual_bills'],0); self.assertEqual(summary['expected_remaining'],-73000)
+        events=self.client.get('/api/export.json').json()['loan_balance_events']; self.assertEqual(events[-1]['interest_minor'],3390)
+        self.assertEqual(self.client.delete(f"/api/transactions/{payment.json()['id']}").status_code,422)
+
+    def test_fixed_loan_saves_unlinked_then_links_from_either_editor(self):
+        loan=self.client.post('/api/credit-facilities',json=self.fixed_loan(name='Unlinked loan'))
+        self.assertEqual(loan.status_code,201,loan.text); self.assertIsNone(loan.json()['linked_recurring_rule_id'])
+        rule=self.client.post('/api/recurring',json=self.recurring(description='Loan payment'))
+        self.assertEqual(rule.status_code,201,rule.text)
+        linked_loan=self.fixed_loan(name='Unlinked loan',linked_recurring_rule_id=rule.json()['id'])
+        edited=self.client.put(f"/api/credit-facilities/{loan.json()['id']}",json=linked_loan)
+        self.assertEqual(edited.status_code,200,edited.text); self.assertEqual(edited.json()['linked_recurring_rule_id'],rule.json()['id'])
+
+        second=self.client.post('/api/credit-facilities',json=self.fixed_loan(name='Link from recurring')).json()
+        second_rule=self.client.post('/api/recurring',json=self.recurring(description='Second loan payment',linked_fixed_loan_id=second['id']))
+        self.assertEqual(second_rule.status_code,201,second_rule.text)
+        facilities={item['id']:item for item in self.client.get('/api/credit-facilities').json()}
+        self.assertEqual(facilities[second['id']]['linked_recurring_rule_id'],second_rule.json()['id'])
+
+    def test_fixed_loan_reconciliation_rate_edit_and_facility_delete_preserve_history(self):
+        loan=self.client.post('/api/credit-facilities',json=self.fixed_loan()).json()
+        reconciled=self.client.post(f"/api/credit-facilities/{loan['id']}/reconcile",json={'amount_owed_minor':434722,'balance_as_of_date':'2026-08-05','note':'Lender balance'})
+        self.assertEqual(reconciled.status_code,200); self.assertEqual(reconciled.json()['amount_owed_minor'],434722)
+        changed=self.fixed_loan(name='Updated car loan',amount_owed_minor=1,annual_rate_basis_points=900,balance_as_of_date='2026-08-15')
+        updated=self.client.put(f"/api/credit-facilities/{loan['id']}",json=changed)
+        expected=434722+daily_simple_interest_minor(434722,825,10)
+        self.assertEqual(updated.status_code,200,updated.text); self.assertEqual(updated.json()['amount_owed_minor'],expected); self.assertEqual(updated.json()['annual_rate_basis_points'],900)
+        payment=self.client.post(f"/api/credit-facilities/{loan['id']}/payments",json={'amount_minor':30000,'transaction_date':'2026-08-20','note':None}); self.assertEqual(payment.status_code,201)
+        self.assertEqual(self.client.delete(f"/api/credit-facilities/{loan['id']}").status_code,204)
+        self.assertEqual(self.client.get('/api/credit-facilities').json(),[])
+        self.assertEqual(len(self.client.get('/api/transactions').json()),1)
+
+    def test_credit_apr_is_display_only_and_account_edit_delete_preserves_transaction(self):
+        card=self.client.post('/api/credit-facilities',json=self.facility(annual_rate_basis_points=1999)).json()
+        expense=self.client.post('/api/transactions',json=self.transaction(amount_minor=12000,payment_method='credit',credit_facility_id=card['id'])).json()
+        updated=self.client.put(f"/api/credit-facilities/{card['id']}",json=self.facility(name='Renamed card',amount_owed_minor=12000,annual_rate_basis_points=2499))
+        self.assertEqual(updated.json()['amount_owed_minor'],12000); self.assertEqual(updated.json()['annual_rate_basis_points'],2499)
+        self.assertEqual(self.client.delete(f"/api/credit-facilities/{card['id']}").status_code,204)
+        self.assertEqual(self.client.get(f"/api/transactions").json()[0]['id'],expense['id'])
+        self.assertEqual(self.client.delete(f"/api/transactions/{expense['id']}").status_code,204)
+
+    def test_recurring_edit_delete_changes_future_only_and_preserves_history(self):
+        rule=self.client.post('/api/recurring',json=self.recurring()).json()
+        recorded=self.client.post(f"/api/occurrences/{rule['id']}/2026-08-15/record",json={}).json()
+        changed=self.recurring(amount_minor=9000,description='Updated phone',interval_count=4,next_due_date='2026-09-15',start_date='2026-09-15')
+        updated=self.client.put(f"/api/recurring/{rule['id']}",json=changed).json(); self.assertEqual(updated['amount_minor'],9000); self.assertEqual(updated['interval_count'],4)
+        self.assertEqual(self.client.delete(f"/api/recurring/{rule['id']}").status_code,204)
+        self.assertEqual(self.client.get('/api/transactions').json()[0]['id'],recorded['id'])
+        self.assertEqual(self.client.get('/api/calendar/2026-09').json()['items'],[])
+
+    def test_reset_requires_typed_confirmation_and_restores_defaults(self):
+        self.client.post('/api/transactions',json=self.transaction()); self.client.post('/api/recurring',json=self.recurring()); self.client.post('/api/credit-facilities',json=self.fixed_loan())
+        self.assertEqual(self.client.post('/api/reset',json={'confirmation':'reset'}).status_code,422)
+        self.assertEqual(self.client.post('/api/reset',json={'confirmation':'RESET'}).status_code,200)
+        self.assertEqual(self.client.get('/api/transactions').json(),[]); self.assertEqual(self.client.get('/api/recurring').json(),[]); self.assertEqual(self.client.get('/api/credit-facilities').json(),[])
+        self.assertTrue(self.client.get('/api/categories').json())
+
     def test_payment_method_validation_requires_matching_facility(self):
         card=self.client.post('/api/credit-facilities',json=self.facility()).json()
         missing=self.client.post('/api/transactions',json=self.transaction(payment_method='credit',credit_facility_id=None)); self.assertEqual(missing.status_code,422)
@@ -176,6 +259,17 @@ class BudgetApiTests(unittest.TestCase):
         old_backup={"version":1,"transactions":[],"recurring_rules":[],"occurrences":[],"categories":[]}
         self.assertEqual(self.client.post('/api/restore?confirm=true',json=old_backup).status_code,200)
 
+    def test_backup_restore_preserves_fixed_loan_rate_link_and_balance_events(self):
+        rule=self.client.post('/api/recurring',json=self.recurring(interval_count=3)).json()
+        loan=self.client.post('/api/credit-facilities',json=self.fixed_loan(linked_recurring_rule_id=rule['id'])).json()
+        self.client.post(f"/api/credit-facilities/{loan['id']}/reconcile",json={'amount_owed_minor':490000,'balance_as_of_date':'2026-08-02','note':'Statement'})
+        backup=self.client.get('/api/export.json').json()
+        self.assertEqual(backup['credit_facilities'][0]['annual_rate_basis_points'],825); self.assertEqual(backup['recurring_rules'][0]['interval_count'],3); self.assertEqual(len(backup['loan_balance_events']),2)
+        self.assertEqual(self.client.post('/api/restore?confirm=true',json=backup).status_code,200)
+        restored=self.client.get('/api/credit-facilities').json()[0]
+        self.assertEqual(restored['linked_recurring_rule_id'],rule['id']); self.assertEqual(restored['amount_owed_minor'],490000)
+        self.assertEqual(self.client.get('/api/recurring').json()[0]['interval_count'],3)
+
     def test_schema_migration_preserves_existing_transactions(self):
         legacy=Path(self.temp.name)/'legacy.sqlite3'; connection=sqlite3.connect(legacy)
         connection.executescript("""CREATE TABLE transactions(id INTEGER PRIMARY KEY,transaction_type TEXT NOT NULL,amount_minor INTEGER NOT NULL,currency TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,transaction_date TEXT NOT NULL,note TEXT,recurring_occurrence_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);INSERT INTO transactions(transaction_type,amount_minor,currency,description,category,transaction_date) VALUES('expense',1234,'AUD','Existing row','Other','2026-08-01');"""); connection.commit(); connection.close()
@@ -185,6 +279,17 @@ class BudgetApiTests(unittest.TestCase):
             with db.connect() as migrated:
                 row=migrated.execute('SELECT * FROM transactions').fetchone(); columns={column['name'] for column in migrated.execute('PRAGMA table_info(transactions)')}
             self.assertEqual(row['description'],'Existing row'); self.assertTrue({'payment_method','credit_facility_id','transaction_role'}.issubset(columns))
+        finally: db.DB_PATH=original
+
+    def test_schema_migration_adds_default_interval_without_changing_rules(self):
+        legacy=Path(self.temp.name)/'legacy-recurring.sqlite3'; connection=sqlite3.connect(legacy)
+        connection.executescript("""CREATE TABLE recurring_rules(id INTEGER PRIMARY KEY,transaction_type TEXT NOT NULL,amount_minor INTEGER NOT NULL,currency TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,frequency TEXT NOT NULL,start_date TEXT NOT NULL,next_due_date TEXT NOT NULL,end_date TEXT,active INTEGER NOT NULL DEFAULT 1,automated_externally INTEGER NOT NULL DEFAULT 0,note TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);INSERT INTO recurring_rules(transaction_type,amount_minor,currency,description,category,frequency,start_date,next_due_date) VALUES('bill',1299,'AUD','Existing subscription','Subscriptions','monthly','2026-08-31','2026-08-31');"""); connection.commit(); connection.close()
+        original=db.DB_PATH; db.DB_PATH=legacy
+        try:
+            db.init_db()
+            with db.connect() as migrated:
+                row=migrated.execute('SELECT * FROM recurring_rules').fetchone(); columns={column['name'] for column in migrated.execute('PRAGMA table_info(recurring_rules)')}
+            self.assertEqual(row['description'],'Existing subscription'); self.assertEqual(row['interval_count'],1); self.assertIn('interval_count',columns)
         finally: db.DB_PATH=original
 
 

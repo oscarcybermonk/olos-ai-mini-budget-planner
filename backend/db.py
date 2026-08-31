@@ -59,6 +59,7 @@ def init_db() -> None:
           amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), currency TEXT NOT NULL DEFAULT 'AUD',
           description TEXT NOT NULL, category TEXT NOT NULL, frequency TEXT NOT NULL
           CHECK(frequency IN ('weekly','fortnightly','monthly','yearly')),
+          interval_count INTEGER NOT NULL DEFAULT 1 CHECK(interval_count BETWEEN 1 AND 120),
           start_date TEXT NOT NULL, next_due_date TEXT NOT NULL, end_date TEXT,
           active INTEGER NOT NULL DEFAULT 1, automated_externally INTEGER NOT NULL DEFAULT 0,
           note TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -71,13 +72,15 @@ def init_db() -> None:
         );
         CREATE TABLE IF NOT EXISTS credit_facilities (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL,
-          facility_type TEXT NOT NULL CHECK(facility_type IN ('credit','pay_later')),
-          credit_limit_minor INTEGER NOT NULL CHECK(credit_limit_minor > 0),
+          facility_type TEXT NOT NULL CHECK(facility_type IN ('credit','pay_later','fixed_loan')),
+          credit_limit_minor INTEGER,
           amount_owed_minor INTEGER NOT NULL DEFAULT 0 CHECK(amount_owed_minor >= 0),
+          annual_rate_basis_points INTEGER, balance_as_of_date TEXT,
           currency TEXT NOT NULL DEFAULT 'AUD', note TEXT,
           active INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK((facility_type='fixed_loan' AND credit_limit_minor IS NULL) OR (facility_type IN ('credit','pay_later') AND credit_limit_minor > 0))
         );
         CREATE TABLE IF NOT EXISTS transactions (
           id INTEGER PRIMARY KEY, transaction_type TEXT NOT NULL CHECK(transaction_type IN ('expense','income','bill','savings')),
@@ -96,6 +99,28 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
         CREATE INDEX IF NOT EXISTS idx_rules_due ON recurring_rules(next_due_date, active);
         """)
+        facility_sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='credit_facilities'").fetchone()[0]
+        if "fixed_loan" not in facility_sql:
+            db.commit()
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.executescript("""
+            BEGIN;
+            CREATE TABLE credit_facilities_new (
+              id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+              facility_type TEXT NOT NULL CHECK(facility_type IN ('credit','pay_later','fixed_loan')),
+              credit_limit_minor INTEGER, amount_owed_minor INTEGER NOT NULL DEFAULT 0 CHECK(amount_owed_minor >= 0),
+              annual_rate_basis_points INTEGER, balance_as_of_date TEXT,
+              currency TEXT NOT NULL DEFAULT 'AUD', note TEXT, active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CHECK((facility_type='fixed_loan' AND credit_limit_minor IS NULL) OR (facility_type IN ('credit','pay_later') AND credit_limit_minor > 0))
+            );
+            INSERT INTO credit_facilities_new(id,name,facility_type,credit_limit_minor,amount_owed_minor,currency,note,active,created_at,updated_at)
+              SELECT id,name,facility_type,credit_limit_minor,amount_owed_minor,currency,note,active,created_at,updated_at FROM credit_facilities;
+            DROP TABLE credit_facilities;
+            ALTER TABLE credit_facilities_new RENAME TO credit_facilities;
+            COMMIT;
+            """)
+            db.execute("PRAGMA foreign_keys=ON")
         transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
         if "payment_method" not in transaction_columns:
             db.execute("ALTER TABLE transactions ADD COLUMN payment_method TEXT")
@@ -103,5 +128,22 @@ def init_db() -> None:
             db.execute("ALTER TABLE transactions ADD COLUMN credit_facility_id INTEGER REFERENCES credit_facilities(id)")
         if "transaction_role" not in transaction_columns:
             db.execute("ALTER TABLE transactions ADD COLUMN transaction_role TEXT NOT NULL DEFAULT 'ordinary'")
+        recurring_columns = {row["name"] for row in db.execute("PRAGMA table_info(recurring_rules)")}
+        if "interval_count" not in recurring_columns:
+            db.execute("ALTER TABLE recurring_rules ADD COLUMN interval_count INTEGER NOT NULL DEFAULT 1 CHECK(interval_count BETWEEN 1 AND 120)")
+        if "linked_fixed_loan_id" not in recurring_columns:
+            db.execute("ALTER TABLE recurring_rules ADD COLUMN linked_fixed_loan_id INTEGER REFERENCES credit_facilities(id)")
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS loan_balance_events (
+          id INTEGER PRIMARY KEY, facility_id INTEGER NOT NULL REFERENCES credit_facilities(id),
+          event_type TEXT NOT NULL CHECK(event_type IN ('created','payment','reconciliation','rate_change')),
+          event_date TEXT NOT NULL, balance_before_minor INTEGER NOT NULL,
+          interest_minor INTEGER NOT NULL DEFAULT 0, amount_minor INTEGER,
+          balance_after_minor INTEGER NOT NULL, transaction_id INTEGER REFERENCES transactions(id),
+          note TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_loan_events_facility_date ON loan_balance_events(facility_id,event_date,id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_rule_per_loan ON recurring_rules(linked_fixed_loan_id) WHERE linked_fixed_loan_id IS NOT NULL AND active=1;
+        """)
         for kind, names in DEFAULT_CATEGORIES.items():
             db.executemany("INSERT OR IGNORE INTO categories(name, transaction_type) VALUES (?, ?)", [(name, kind) for name in names])

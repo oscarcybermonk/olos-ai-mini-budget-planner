@@ -1,234 +1,88 @@
 const state = {
   month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   type: 'expense', recurringType: 'bill', transactions: [], categories: [],
-  facilities: [], calendarItems: [],
+  facilities: [], recurringRules: [], calendarItems: [],
 };
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const iso = day => `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
-const money = cents => new Intl.NumberFormat('en-AU', {style: 'currency', currency: 'AUD'}).format(cents / 100);
+const money = cents => new Intl.NumberFormat('en-AU', {style: 'currency', currency: 'AUD'}).format((cents || 0) / 100);
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
 const defaults = {expense: 'Other', income: 'Other Income', bill: 'Utilities', savings: 'Savings'};
-const typeLabels = {expense: 'expense', income: 'income', bill: 'bill', savings: 'savings'};
 const entryKinds = {expense: 'an expense', income: 'income', bill: 'a bill', savings: 'a savings transfer'};
+const facilityLabels = {credit: 'Credit', pay_later: 'Pay Later', fixed_loan: 'Fixed Loan'};
 
-class ApiError extends Error {
-  constructor(message, errors = []) { super(message); this.errors = errors; }
-}
-
+class ApiError extends Error { constructor(message, errors = []) { super(message); this.errors = errors; } }
 async function api(path, options = {}) {
   const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
   const response = await fetch(path, {...options, headers});
-  if (!response.ok) {
-    let body = {};
-    try { body = await response.json(); } catch {}
-    throw new ApiError(body.detail || 'Something went wrong. Your data was not changed.', body.errors || []);
-  }
-  return response.status === 204 ? null : response.json();
+  if (!response.ok) { let body={};try{body=await response.json()}catch{}throw new ApiError(body.detail||'Something went wrong. Your data was not changed.',body.errors||[]) }
+  return response.status===204?null:response.json();
 }
+function toast(message){const element=$('#toast');element.textContent=message;element.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>element.classList.remove('show'),3200)}
+function monthKey(){return iso(state.month).slice(0,7)}
+function parseMinor(value,fieldName='Amount',allowZero=false){const raw=String(value).trim(),formatted=raw.replace(/^\$\s*/,'').trim();if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(formatted))throw new ApiError(`${fieldName}: enter a valid amount with up to two decimal places`);const text=formatted.replace(/,/g,''),[whole,fraction='']=text.split('.'),cents=Number(whole)*100+Number(fraction.padEnd(2,'0'));if(!Number.isSafeInteger(cents)||cents<0||(!allowZero&&cents===0))throw new ApiError(`${fieldName}: enter an amount ${allowZero?'of zero or more':'greater than zero'}`);return cents}
+function parseRate(value){const text=String(value).trim();if(!text)return null;if(!/^\d+(?:\.\d{1,2})?$/.test(text))throw new ApiError('Interest rate: enter a percentage with up to two decimal places');const[whole,fraction='']=text.split('.'),points=Number(whole)*100+Number(fraction.padEnd(2,'0'));if(points>100000)throw new ApiError('Interest rate is too large');return points}
+function rateText(points){return points==null?'':`${(points/100).toFixed(2)}% p.a.`}
 
-function toast(message) {
-  const element = $('#toast'); element.textContent = message; element.classList.add('show');
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => element.classList.remove('show'), 3000);
-}
-
-function monthKey() { return iso(state.month).slice(0, 7); }
-function parseMinor(value, fieldName = 'Amount') {
-  const text = String(value).trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) throw new ApiError(`${fieldName}: enter a valid amount with up to two decimal places`);
-  const cents = Math.round(Number(text) * 100);
-  if (cents <= 0) throw new ApiError(`${fieldName}: enter an amount greater than zero`);
-  return cents;
-}
-
-function clearFormErrors() {
-  $$('.field-error').forEach(element => { element.textContent = ''; });
-  $$('#transaction-form [aria-invalid="true"]').forEach(element => element.removeAttribute('aria-invalid'));
-}
-
-function showFormErrors(errors) {
-  const ids = {amount_minor: 'amount', transaction_date: 'transaction-date', description: 'description', category: 'category', credit_facility_id: 'expense-facility', payment_method: 'payment-method'};
-  errors.forEach(({field, message}) => {
-    const input = $(`#${ids[field] || field}`);
-    if (!input) return;
-    input.setAttribute('aria-invalid', 'true');
-    const error = $(`#${(ids[field] || field)}-error`) || input.closest('label')?.querySelector('.field-error');
-    if (error) error.textContent = message;
-  });
-  const first = $('#transaction-form [aria-invalid="true"]'); if (first) first.focus();
-}
-
-function validateTransactionForm() {
-  const errors = [];
-  try { parseMinor($('#amount').value); } catch (error) { errors.push({field: 'amount_minor', message: error.message.replace('Amount: ', '')}); }
-  if (!$('#description').value.trim()) errors.push({field: 'description', message: 'Enter a description'});
-  if (!$('#transaction-date').value || Number.isNaN(Date.parse(`${$('#transaction-date').value}T00:00:00`))) errors.push({field: 'transaction_date', message: 'Choose a valid date'});
-  if (!$('#category').value.trim()) errors.push({field: 'category', message: 'Choose or enter a category'});
-  const method = $('#payment-method').value;
-  if (state.type === 'expense' && ['credit', 'pay_later'].includes(method) && !$('#expense-facility').value) errors.push({field: 'credit_facility_id', message: 'Choose the account used'});
-  return errors;
-}
-
-function renderCategories() {
-  const names = state.categories.filter(category => category.transaction_type === state.type || (state.type === 'expense' && category.transaction_type === 'bill')).map(category => category.name);
-  $('#category-list').innerHTML = [...new Set(names)].map(name => `<option value="${escapeHtml(name)}">`).join('');
-}
-
-function matchingFacilities(method) { return state.facilities.filter(facility => facility.facility_type === method); }
-function renderExpenseFacilities() {
-  const method = $('#payment-method').value;
-  const needsFacility = state.type === 'expense' && ['credit', 'pay_later'].includes(method);
-  $('#facility-select-label').hidden = !needsFacility;
-  if (!needsFacility) { $('#expense-facility').innerHTML = ''; return; }
-  const facilities = matchingFacilities(method);
-  $('#expense-facility').innerHTML = `<option value="">Choose account</option>${facilities.map(facility => `<option value="${facility.id}">${escapeHtml(facility.name)} · ${money(facility.available_credit_minor)} available</option>`).join('')}`;
-}
+function clearFormErrors(){$$('.field-error').forEach(element=>{element.textContent=''});$$('#transaction-form [aria-invalid="true"]').forEach(element=>element.removeAttribute('aria-invalid'))}
+function showFormErrors(errors){const ids={amount_minor:'amount',transaction_date:'transaction-date',description:'description',category:'category',credit_facility_id:'expense-facility',payment_method:'payment-method'};errors.forEach(({field,message})=>{const input=$(`#${ids[field]||field}`);if(!input)return;input.setAttribute('aria-invalid','true');const error=$(`#${ids[field]||field}-error`)||input.closest('label')?.querySelector('.field-error');if(error)error.textContent=message});$('#transaction-form [aria-invalid="true"]')?.focus()}
+function validateTransactionForm(){const errors=[];try{parseMinor($('#amount').value)}catch(error){errors.push({field:'amount_minor',message:error.message.replace('Amount: ','')})}if(!$('#description').value.trim())errors.push({field:'description',message:'Enter a description'});if(!$('#transaction-date').value||Number.isNaN(Date.parse(`${$('#transaction-date').value}T00:00:00`)))errors.push({field:'transaction_date',message:'Choose a valid date'});if(!$('#category').value.trim())errors.push({field:'category',message:'Choose or enter a category'});const method=$('#payment-method').value;if(state.type==='expense'&&['credit','pay_later'].includes(method)&&!$('#expense-facility').value)errors.push({field:'credit_facility_id',message:'Choose the account used'});return errors}
+function renderCategories(){const names=state.categories.filter(category=>category.transaction_type===state.type||(state.type==='expense'&&category.transaction_type==='bill')).map(category=>category.name);$('#category-list').innerHTML=[...new Set(names)].map(name=>`<option value="${escapeHtml(name)}">`).join('')}
+function matchingFacilities(method){return state.facilities.filter(facility=>facility.facility_type===method)}
+function renderExpenseFacilities(){const method=$('#payment-method').value,needs=state.type==='expense'&&['credit','pay_later'].includes(method);$('#facility-select-label').hidden=!needs;if(!needs){$('#expense-facility').innerHTML='';return}const facilities=matchingFacilities(method);$('#expense-facility').innerHTML=`<option value="">Choose account</option>${facilities.map(f=>`<option value="${f.id}">${escapeHtml(f.name)} · ${money(f.available_credit_minor)} available</option>`).join('')}`}
 
 // Switching type deliberately preserves amount, description, date and note. A default/blank
 // category is replaced, while a custom category is kept; the live label makes the new type explicit.
-function setType(type, {announce = true} = {}) {
-  const previous = state.type;
-  const category = $('#category').value.trim();
-  state.type = type;
-  $$('.type-tab').forEach(button => { const active = button.dataset.type === type; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
-  if (!category || category === defaults[previous]) $('#category').value = defaults[type];
-  $('#entry-kind').textContent = `Recording ${entryKinds[type]}`;
-  $('#save-label').textContent = `Save ${typeLabels[type]}`;
-  $('#payment-fields').hidden = type !== 'expense';
-  renderCategories(); renderExpenseFacilities(); clearFormErrors();
-  if (announce && previous !== type && ($('#amount').value || $('#description').value)) toast(`Entry kept — now recording ${entryKinds[type]}`);
-}
+function setType(type,{announce=true}={}){const previous=state.type,category=$('#category').value.trim();state.type=type;$$('.type-tab').forEach(button=>{const active=button.dataset.type===type;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});if(!category||category===defaults[previous])$('#category').value=defaults[type];$('#entry-kind').textContent=`Recording ${entryKinds[type]}`;$('#save-label').textContent=`Save ${type}`;$('#payment-fields').hidden=type!=='expense';renderCategories();renderExpenseFacilities();clearFormErrors();if(announce&&previous!==type&&($('#amount').value||$('#description').value))toast(`Entry kept — now recording ${entryKinds[type]}`)}
+function renderSnapshot(summary){const repayments=summary.actual_credit_payments+summary.actual_loan_payments;const metrics=[['Available after planned bills',summary.expected_remaining,`${money(summary.expected_income)} still expected`,'primary'],['Income received',summary.actual_income,`${money(summary.expected_income)} expected`,'income'],['Spent this month',summary.actual_expenses+summary.actual_bills,`${money(summary.bills_remaining)} bills · ${money(repayments)} repayments`,'spending'],['Savings',summary.actual_savings,`${money(summary.planned_savings_remaining)} still planned`,'savings']];$('#snapshot').innerHTML=metrics.map(([label,value,detail,kind])=>`<article class="metric ${kind}"><div class="metric-label">${label}</div><div class="metric-value">${money(value)}</div><div class="metric-detail">${detail}</div></article>`).join('')}
+function renderLiabilityStrip(){const strip=$('#liability-strip');strip.hidden=!state.facilities.length;strip.innerHTML=state.facilities.map(f=>`<span><strong>${escapeHtml(f.name)}</strong> · ${f.facility_type==='fixed_loan'?`${money(f.amount_owed_minor)} estimated owing`:`${money(f.available_credit_minor)} available`}</span>`).join('')}
 
-function renderSnapshot(summary) {
-  const metrics = [
-    ['Available after planned bills', summary.expected_remaining, `${money(summary.expected_income)} still expected`, 'primary'],
-    ['Income received', summary.actual_income, `${money(summary.expected_income)} expected`, ''],
-    ['Spent this month', summary.actual_expenses + summary.actual_bills, `${money(summary.bills_remaining)} bills · ${money(summary.actual_credit_payments)} repayments`, ''],
-    ['Savings', summary.actual_savings, `${money(summary.planned_savings_remaining)} still planned`, ''],
-  ];
-  $('#snapshot').innerHTML = metrics.map(([label, value, detail, kind]) => `<article class="metric ${kind}"><div class="metric-label">${label}</div><div class="metric-value">${money(value)}</div><div class="metric-detail">${detail}</div></article>`).join('');
-}
+function activityRow(transaction,example=false){const creditPayment=transaction.transaction_role==='credit_payment',loanPayment=transaction.transaction_role==='loan_payment',repayment=creditPayment||loanPayment,sign=transaction.transaction_type==='income'?'+':'−',icon=repayment?'↘':({income:'+',expense:'−',bill:'−',savings:'↗'}[transaction.transaction_type]),method=transaction.payment_method&&transaction.transaction_type==='expense'?` · ${transaction.payment_method.replace('_',' ')}`:'';let controls='';if(loanPayment)controls='<span class="preserved-label">Balance audit preserved</span>';else if(creditPayment)controls=`<button class="action-delete" data-delete="${transaction.id}" aria-label="Delete ${escapeHtml(transaction.description)}">Delete</button>`;else controls=`<button class="action-edit" data-edit="${transaction.id}" aria-label="Edit ${escapeHtml(transaction.description)}">Edit</button><button class="action-delete" data-delete="${transaction.id}" aria-label="Delete ${escapeHtml(transaction.description)}">Delete</button>`;if(example)controls=controls.replaceAll('data-edit="0"','data-example-action="edit"').replaceAll('data-delete="0"','data-example-action="delete"');return `<article class="activity-item${example?' example-row':''}"><span class="item-icon ${repayment?'repayment':transaction.transaction_type}" aria-hidden="true">${icon}</span><div><div class="item-title">${escapeHtml(transaction.description)}</div><div class="item-meta">${escapeHtml(transaction.category)}${method} · ${example?'Example only':new Date(`${transaction.transaction_date}T00:00`).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</div></div><div><div class="item-amount">${sign}${money(transaction.amount_minor)}</div><div class="item-actions">${controls}</div></div></article>`}
+function renderActivity(){const element=$('#activity-list');if(!state.transactions.length){const sample={id:0,transaction_type:'expense',transaction_role:'ordinary',amount_minor:2450,description:'Example lunch',category:'Dining',transaction_date:iso(new Date()),payment_method:'debit'};element.innerHTML=`<div class="first-run-note"><strong>Your activity will appear here.</strong><span>This example is not saved.</span></div>${activityRow(sample,true)}`;return}element.innerHTML=state.transactions.map(item=>activityRow(item)).join('')}
+function renderUpcoming(items){const element=$('#upcoming-list'),open=items.filter(item=>['upcoming','due'].includes(item.state));if(!open.length){element.innerHTML='<p class="empty-state">Nothing planned for the next 30 days.<br>Add a recurring item when you’re ready.</p>';return}const meanings={income:'Expected income',bill:'Planned bill',savings:'Planned savings'};element.innerHTML=open.slice(0,12).map(item=>`<article class="upcoming-item"><span class="item-icon ${item.transaction_type}" role="img" aria-label="${meanings[item.transaction_type]}" title="${meanings[item.transaction_type]}">${{income:'+',bill:'−',savings:'↗'}[item.transaction_type]}</span><div><div class="item-title">${escapeHtml(item.description)}</div><div class="item-meta">${new Date(`${item.due_date}T00:00`).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})}${item.automated_externally?' · automated':''}</div></div><div><div class="item-amount">${item.transaction_type==='income'?'+':'−'}${money(item.amount_minor)}</div><div class="item-actions"><button class="action-record" data-record="${item.rule_id}|${item.due_date}" aria-label="Record ${escapeHtml(item.description)} as an actual transaction" title="Convert this planned item into an actual transaction">Record as paid</button><button class="action-edit" data-skip="${item.rule_id}|${item.due_date}">Skip once</button></div></div></article>`).join('')}
+function recurringInterval(rule){if(rule?.frequency==='fortnightly')return{frequency:'weekly',count:(rule.interval_count||1)*2};return{frequency:rule?.frequency||'monthly',count:rule?.interval_count||1}}
+function recurrenceText(rule){const interval=recurringInterval(rule),unit={weekly:'week',monthly:'month',yearly:'year'}[interval.frequency];return `every ${interval.count} ${unit}${interval.count===1?'':'s'}`}
+function renderRecurringRules(){const element=$('#recurring-rule-list'),rules=state.recurringRules.filter(rule=>rule.active);if(!rules.length){element.innerHTML='<p class="empty-state compact">No active recurring rules.</p>';return}element.innerHTML=rules.map(rule=>`<article class="rule-item"><div><div class="item-title">${escapeHtml(rule.description)}</div><div class="item-meta">${rule.transaction_type} · ${money(rule.amount_minor)} · ${recurrenceText(rule)} · next ${new Date(`${rule.next_due_date}T00:00`).toLocaleDateString('en-AU')}</div></div><div class="item-actions"><button class="action-edit" data-rule-edit="${rule.id}">Edit</button><button class="action-delete" data-rule-delete="${rule.id}">Delete rule</button></div></article>`).join('')}
 
-function activityRow(transaction, example = false) {
-  const repayment = transaction.transaction_role === 'credit_payment';
-  const sign = transaction.transaction_type === 'income' ? '+' : '−';
-  const icon = repayment ? '↘' : ({income: '+', expense: '−', bill: '−', savings: '↗'}[transaction.transaction_type]);
-  const method = transaction.payment_method && transaction.transaction_type === 'expense' ? ` · ${transaction.payment_method.replace('_', ' ')}` : '';
-  const controls = repayment
-    ? `<button class="action-delete" data-delete="${transaction.id}" aria-label="Delete ${escapeHtml(transaction.description)}">Delete</button>`
-    : `<button class="action-edit" data-edit="${transaction.id}" aria-label="Edit ${escapeHtml(transaction.description)}">Edit</button><button class="action-delete" data-delete="${transaction.id}" aria-label="Delete ${escapeHtml(transaction.description)}">Delete</button>`;
-  return `<article class="activity-item${example ? ' example-row' : ''}"><span class="item-icon ${repayment ? 'repayment' : transaction.transaction_type}" aria-hidden="true">${icon}</span><div><div class="item-title">${escapeHtml(transaction.description)}</div><div class="item-meta">${escapeHtml(transaction.category)}${method} · ${example ? 'Example only' : new Date(`${transaction.transaction_date}T00:00`).toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</div></div><div><div class="item-amount">${sign}${money(transaction.amount_minor)}</div><div class="item-actions">${example ? controls.replaceAll(`data-edit="0"`, 'data-example-action="edit"').replaceAll(`data-delete="0"`, 'data-example-action="delete"') : controls}</div></div></article>`;
-}
+function renderFacilities(){$('#facility-count').textContent=state.facilities.length?`(${state.facilities.length})`:'(optional)';const element=$('#facility-list');if(!state.facilities.length){element.innerHTML='<p class="empty-state compact">No accounts added. Add one only if you want to track a credit, pay-later balance or fixed loan.</p>';renderLiabilityStrip();return}element.innerHTML=state.facilities.map(f=>{const fixed=f.facility_type==='fixed_loan',meta=fixed?`Fixed Loan${f.annual_rate_basis_points!=null?` · ${rateText(f.annual_rate_basis_points)}`:''}`:`${facilityLabels[f.facility_type]} · Limit ${money(f.credit_limit_minor)}${f.annual_rate_basis_points!=null?` · ${rateText(f.annual_rate_basis_points)}`:''}`,balance=fixed?`<small>Estimated balance</small><strong>${money(f.amount_owed_minor)}</strong><span>as of ${new Date(`${f.balance_as_of_date}T00:00`).toLocaleDateString('en-AU')}</span>`:`<small>Owed</small><strong>${money(f.amount_owed_minor)}</strong><span>${money(f.available_credit_minor)} available</span>`;return `<article class="facility-item"><div><div class="item-title">${escapeHtml(f.name)}</div><div class="item-meta">${meta}</div></div><div class="facility-balance">${balance}</div><div class="facility-actions"><button class="small-button payment-action" data-payment="${f.id}" ${f.amount_owed_minor?'':'disabled'}>Payment</button><button class="action-edit" data-facility-edit="${f.id}">Edit</button>${fixed?`<button class="action-edit" data-balance-edit="${f.id}">Edit balance</button>`:''}<button class="action-delete" data-facility-delete="${f.id}">Delete</button></div></article>`}).join('');renderLiabilityStrip()}
+async function refresh(){try{const[summary,transactions,upcoming,categories,facilities,recurringRules]=await Promise.all([api(`/api/summary/${monthKey()}`),api(`/api/transactions?limit=20&month=${monthKey()}`),api('/api/upcoming?days=30'),api('/api/categories'),api('/api/credit-facilities'),api('/api/recurring')]);Object.assign(state,{transactions,categories,facilities,recurringRules});renderSnapshot(summary);renderActivity();renderUpcoming(upcoming);renderCategories();renderFacilities();renderRecurringRules();renderExpenseFacilities();$('#current-month').textContent=state.month.toLocaleDateString('en-AU',{month:'long',year:'numeric'})}catch(error){toast(error.message)}}
 
-function renderActivity() {
-  const element = $('#activity-list');
-  if (!state.transactions.length) {
-    const sample = {id:0,transaction_type:'expense',transaction_role:'ordinary',amount_minor:2450,description:'Example lunch',category:'Dining',transaction_date:iso(new Date()),payment_method:'debit'};
-    element.innerHTML = `<div class="first-run-note"><strong>Your activity will appear here.</strong><span>This example is not saved.</span></div>${activityRow(sample, true)}`;
-    return;
-  }
-  element.innerHTML = state.transactions.map(transaction => activityRow(transaction)).join('');
-}
+function resetForm(){$('#transaction-form').reset();$('#transaction-id').value='';$('#transaction-date').value=iso(new Date());$('#category').value=defaults[state.type];$('#payment-method').value='debit';$('#cancel-edit').hidden=true;$('#draft-note').hidden=true;$('#save-label').textContent=`Save ${state.type}`;clearFormErrors();renderExpenseFacilities()}
+function fillEdit(item){setType(item.transaction_type,{announce:false});$('#transaction-id').value=item.id;$('#amount').value=(item.amount_minor/100).toFixed(2);$('#description').value=item.description;$('#category').value=item.category;$('#transaction-date').value=item.transaction_date;$('#note').value=item.note||'';$('#payment-method').value=item.payment_method||'debit';renderExpenseFacilities();if(item.credit_facility_id)$('#expense-facility').value=String(item.credit_facility_id);$('#cancel-edit').hidden=false;$('#save-label').textContent='Update transaction';$('#transaction-form').scrollIntoView({behavior:'smooth',block:'center'});$('#amount').focus()}
+$('#transaction-form').addEventListener('submit',async event=>{event.preventDefault();clearFormErrors();const errors=validateTransactionForm();if(errors.length){showFormErrors(errors);toast(errors[0].message);return}try{const id=$('#transaction-id').value,method=state.type==='expense'?$('#payment-method').value:null,payload={transaction_type:state.type,amount_minor:parseMinor($('#amount').value),currency:'AUD',description:$('#description').value.trim(),category:$('#category').value.trim(),transaction_date:$('#transaction-date').value,note:$('#note').value.trim()||null,payment_method:method,credit_facility_id:method&&['credit','pay_later'].includes(method)?Number($('#expense-facility').value):null};await api(id?`/api/transactions/${id}`:'/api/transactions',{method:id?'PUT':'POST',headers:id?{}:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(payload)});toast(id?'Transaction updated':`${state.type==='income'?'Income':state.type[0].toUpperCase()+state.type.slice(1)} saved`);resetForm(); await refresh()}catch(error){showFormErrors(error.errors||[]);toast(error.message)}});
+$$('.type-tab').forEach(button=>button.addEventListener('click',()=>setType(button.dataset.type)));$('#payment-method').addEventListener('change',renderExpenseFacilities);$('#cancel-edit').addEventListener('click',resetForm);
+$('#activity-list').addEventListener('click',async event=>{if(event.target.dataset.exampleAction){toast(`${event.target.textContent} controls appear here once you save a real transaction`);return}const edit=event.target.dataset.edit,remove=event.target.dataset.delete;if(edit)fillEdit(state.transactions.find(item=>item.id===Number(edit)));if(remove&&confirm('Delete this transaction? Any linked credit balance will be adjusted.')){try{await api(`/api/transactions/${remove}`,{method:'DELETE'});toast('Transaction deleted');await refresh()}catch(error){toast(error.message)}}});
+$('#upcoming-list').addEventListener('click',async event=>{const record=event.target.dataset.record,skip=event.target.dataset.skip;try{if(record){const[id,due]=record.split('|');await api(`/api/occurrences/${id}/${due}/record`,{method:'POST',body:'{}'});toast('Planned item recorded as an actual transaction')}if(skip){const[id,due]=skip.split('|');if(!confirm('Skip this occurrence only? The recurring rule will remain active.'))return;await api(`/api/occurrences/${id}/${due}/skip`,{method:'POST'});toast('One occurrence skipped')}if(record||skip)await refresh()}catch(error){toast(error.message)}});
 
-function renderUpcoming(items) {
-  const element = $('#upcoming-list'); const open = items.filter(item => ['upcoming','due'].includes(item.state));
-  if (!open.length) { element.innerHTML = '<p class="empty-state">Nothing planned for the next 30 days.<br>Add a recurring item when you’re ready.</p>'; return; }
-  const meanings = {income: 'Expected income', bill: 'Planned bill', savings: 'Planned savings'};
-  element.innerHTML = open.slice(0, 12).map(item => `<article class="upcoming-item"><span class="item-icon ${item.transaction_type}" role="img" aria-label="${meanings[item.transaction_type]}" title="${meanings[item.transaction_type]}">${{income:'+',bill:'−',savings:'↗'}[item.transaction_type]}</span><div><div class="item-title">${escapeHtml(item.description)}</div><div class="item-meta">${new Date(`${item.due_date}T00:00`).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})}${item.automated_externally?' · automated':''}</div></div><div><div class="item-amount">${item.transaction_type==='income'?'+':'−'}${money(item.amount_minor)}</div><div class="item-actions"><button class="action-record" data-record="${item.rule_id}|${item.due_date}" aria-label="Record ${escapeHtml(item.description)} as an actual transaction" title="Convert this planned item into an actual transaction">Record as paid</button><button class="action-edit" data-skip="${item.rule_id}|${item.due_date}">Skip</button></div></div></article>`).join('');
-}
+function changeMonth(delta){state.month=new Date(state.month.getFullYear(),state.month.getMonth()+delta,1);refresh()}$('#previous-month').addEventListener('click',()=>changeMonth(-1));$('#next-month').addEventListener('click',()=>changeMonth(1));
+const calendarDialog=$('#calendar-dialog');async function openCalendar(){try{const data=await api(`/api/calendar/${monthKey()}`);state.calendarItems=data.items;renderCalendar();calendarDialog.showModal()}catch(error){toast(error.message)}}
+function renderCalendar(){const year=state.month.getFullYear(),month=state.month.getMonth(),days=new Date(year,month+1,0).getDate(),offset=(new Date(year,month,1).getDay()+6)%7,grouped=Object.groupBy?Object.groupBy(state.calendarItems,item=>item.due_date):state.calendarItems.reduce((all,item)=>((all[item.due_date]??=[]).push(item),all),{});$('#calendar-title').textContent=state.month.toLocaleDateString('en-AU',{month:'long',year:'numeric'});let cells='<span class="calendar-spacer" aria-hidden="true"></span>'.repeat(offset);for(let day=1;day<=days;day++){const key=`${monthKey()}-${String(day).padStart(2,'0')}`,items=grouped[key]||[],labels=items.map(item=>({income:'Expected income',bill:'Planned bill',savings:'Planned savings'}[item.transaction_type])).join(', '),markers=items.map(item=>`<i class="marker ${item.transaction_type}" title="${{income:'Expected income',bill:'Planned bill',savings:'Planned savings'}[item.transaction_type]}"></i>`).join('');cells+=`<button class="calendar-day" data-calendar-date="${key}" aria-label="${day}${labels?`: ${labels}`:''}"><span>${day}</span><span class="day-markers" aria-hidden="true">${markers}</span></button>`}$('#calendar-grid').innerHTML=cells;$('#calendar-day-detail').textContent='Choose a marked day to see its plans.'}
+$('#current-month').addEventListener('click',openCalendar);$('#calendar-dialog .dialog-close').addEventListener('click',()=>calendarDialog.close());calendarDialog.addEventListener('click',event=>{if(event.target===calendarDialog)calendarDialog.close()});$('#calendar-grid').addEventListener('click',event=>{const button=event.target.closest('[data-calendar-date]');if(!button)return;const items=state.calendarItems.filter(item=>item.due_date===button.dataset.calendarDate);$('#calendar-day-detail').innerHTML=items.length?`<strong>${new Date(`${button.dataset.calendarDate}T00:00`).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</strong>${items.map(item=>`<span>${escapeHtml(item.description)} · ${money(item.amount_minor)}</span>`).join('')}`:'No planned recurring items on this day.'});
 
-function renderFacilities() {
-  $('#facility-count').textContent = state.facilities.length ? `(${state.facilities.length})` : '(optional)';
-  const element = $('#facility-list');
-  if (!state.facilities.length) { element.innerHTML = '<p class="empty-state compact">No accounts added. Add one only if you want to track a credit or pay-later balance.</p>'; return; }
-  element.innerHTML = state.facilities.map(facility => `<article class="facility-item"><div><div class="item-title">${escapeHtml(facility.name)}</div><div class="item-meta">${facility.facility_type === 'credit' ? 'Credit' : 'Pay Later'} · Limit ${money(facility.credit_limit_minor)}</div></div><div class="facility-balance"><small>Owed</small><strong>${money(facility.amount_owed_minor)}</strong><span>${money(facility.available_credit_minor)} available</span></div><button class="small-button payment-action" data-payment="${facility.id}" ${facility.amount_owed_minor ? '' : 'disabled'}>Payment</button></article>`).join('');
-}
+const recurringDialog=$('#recurring-dialog'),recurringListDialog=$('#recurring-list-dialog');
+function setRecurringType(type){state.recurringType=type;$$('.recurring-tab').forEach(button=>button.classList.toggle('active',button.dataset.type===type));$('#recurring-category').value=defaults[type];$('#recurring-loan-label').hidden=type!=='bill'}
+function populateLinks(){const fixed=state.facilities.filter(f=>f.facility_type==='fixed_loan');$('#recurring-loan').innerHTML=`<option value="">None — link later</option>${fixed.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('')}`;const bills=state.recurringRules.filter(rule=>rule.active&&rule.transaction_type==='bill');$('#facility-rule').innerHTML=`<option value="">None — link later</option>${bills.map(rule=>`<option value="${rule.id}">${escapeHtml(rule.description)} · ${money(rule.amount_minor)}</option>`).join('')}`}
+function openRecurring(rule=null){$('#recurring-form').reset();const interval=recurringInterval(rule);$('#recurring-id').value=rule?.id||'';$('#recurring-dialog-title').textContent=rule?'Edit recurring rule':'Add recurring item';$('#recurring-save').textContent=rule?'Save future changes':'Add recurring item';setRecurringType(rule?.transaction_type||'bill');$('#recurring-amount').value=rule?(rule.amount_minor/100).toFixed(2):'';$('#interval-count').value=interval.count;$('#frequency').value=interval.frequency;$('#recurring-description').value=rule?.description||'';$('#recurring-category').value=rule?.category||defaults[state.recurringType];$('#next-due').value=rule?.next_due_date||iso(new Date());$('#recurring-end').value=rule?.end_date||'';$('#recurring-note').value=rule?.note||'';$('#automated').checked=Boolean(rule?.automated_externally);$('#recurring-active').checked=rule?Boolean(rule.active):true;populateLinks();$('#recurring-loan').value=rule?.linked_fixed_loan_id?String(rule.linked_fixed_loan_id):'';recurringDialog.showModal()}
+$('#add-recurring').addEventListener('click',()=>openRecurring());$('#manage-recurring').addEventListener('click',()=>{renderRecurringRules();recurringListDialog.showModal()});$('#recurring-list-dialog .dialog-close').addEventListener('click',()=>recurringListDialog.close());$$('.recurring-tab').forEach(button=>button.addEventListener('click',()=>setRecurringType(button.dataset.type)));
+$('#recurring-form').addEventListener('submit',async event=>{event.preventDefault();try{const id=$('#recurring-id').value,due=$('#next-due').value,intervalCount=Number($('#interval-count').value);if(!Number.isInteger(intervalCount)||intervalCount<1||intervalCount>120)throw new ApiError('Repeat interval: enter a whole number from 1 to 120');const payload={transaction_type:state.recurringType,amount_minor:parseMinor($('#recurring-amount').value),currency:'AUD',description:$('#recurring-description').value.trim(),category:$('#recurring-category').value.trim(),frequency:$('#frequency').value,interval_count:intervalCount,start_date:due,next_due_date:due,end_date:$('#recurring-end').value||null,active:$('#recurring-active').checked,automated_externally:$('#automated').checked,note:$('#recurring-note').value.trim()||null,linked_fixed_loan_id:state.recurringType==='bill'&&$('#recurring-loan').value?Number($('#recurring-loan').value):null};await api(id?`/api/recurring/${id}`:'/api/recurring',{method:id?'PUT':'POST',body:JSON.stringify(payload)});recurringDialog.close();toast(id?'Recurring rule updated':'Recurring item added');await refresh()}catch(error){toast(error.message)}});
+$('#recurring-rule-list').addEventListener('click',async event=>{const edit=Number(event.target.dataset.ruleEdit),remove=Number(event.target.dataset.ruleDelete);if(edit){recurringListDialog.close();openRecurring(state.recurringRules.find(rule=>rule.id===edit))}if(remove&&confirm('Delete this recurring rule? Future projections stop, but recorded transactions and completed payments stay in your history.')){try{await api(`/api/recurring/${remove}`,{method:'DELETE'});toast('Recurring rule deleted; history preserved');await refresh()}catch(error){toast(error.message)}}});
 
-async function refresh() {
-  try {
-    const [summary, transactions, upcoming, categories, facilities] = await Promise.all([
-      api(`/api/summary/${monthKey()}`), api(`/api/transactions?limit=20&month=${monthKey()}`), api('/api/upcoming?days=30'), api('/api/categories'), api('/api/credit-facilities'),
-    ]);
-    Object.assign(state, {transactions, categories, facilities});
-    renderSnapshot(summary); renderActivity(); renderUpcoming(upcoming); renderCategories(); renderFacilities(); renderExpenseFacilities();
-    $('#current-month').textContent = state.month.toLocaleDateString('en-AU',{month:'long',year:'numeric'});
-  } catch (error) { toast(error.message); }
-}
+const facilityDialog=$('#facility-dialog');
+function updateFacilityFields(){const fixed=$('#facility-type').value==='fixed_loan';$('#facility-limit-label').hidden=fixed;$('#facility-date-label').hidden=!fixed;$('#facility-rule-label').hidden=!fixed;$('#rate-help').textContent=fixed?'Fixed-loan interest is estimated daily and applied when a payment is recorded.':'APR is display-only for Credit and Pay Later accounts.'}
+function openFacility(facility=null){$('#facility-form').reset();$('#facility-id').value=facility?.id||'';$('#facility-dialog-title').textContent=facility?'Edit account':'Add account';$('#facility-save').textContent=facility?'Save account':'Add account';$('#facility-name').value=facility?.name||'';$('#facility-type').value=facility?.facility_type||'credit';$('#facility-type').disabled=Boolean(facility);$('#facility-limit').value=facility?.credit_limit_minor!=null?(facility.credit_limit_minor/100).toFixed(2):'';$('#facility-owed').value=facility?(facility.amount_owed_minor/100).toFixed(2):'0.00';$('#facility-owed').disabled=Boolean(facility?.facility_type==='fixed_loan');$('#facility-rate').value=facility?.annual_rate_basis_points!=null?(facility.annual_rate_basis_points/100).toFixed(2):'';$('#facility-date').value=facility?.balance_as_of_date||iso(new Date());$('#facility-note').value=facility?.note||'';populateLinks();$('#facility-rule').value=facility?.linked_recurring_rule_id?String(facility.linked_recurring_rule_id):'';updateFacilityFields();facilityDialog.showModal()}
+$('#add-facility').addEventListener('click',()=>openFacility());$('#facility-type').addEventListener('change',updateFacilityFields);
+$('#facility-form').addEventListener('submit',async event=>{event.preventDefault();try{const id=$('#facility-id').value,type=$('#facility-type').value,existing=id?state.facilities.find(f=>f.id===Number(id)):null,payload={name:$('#facility-name').value.trim(),facility_type:type,credit_limit_minor:type==='fixed_loan'?null:parseMinor($('#facility-limit').value,'Credit limit'),amount_owed_minor:existing?.facility_type==='fixed_loan'?existing.amount_owed_minor:parseMinor($('#facility-owed').value||'0','Amount owed',true),annual_rate_basis_points:parseRate($('#facility-rate').value),balance_as_of_date:type==='fixed_loan'?$('#facility-date').value:null,linked_recurring_rule_id:type==='fixed_loan'&&$('#facility-rule').value?Number($('#facility-rule').value):null,currency:'AUD',note:$('#facility-note').value.trim()||null};await api(id?`/api/credit-facilities/${id}`:'/api/credit-facilities',{method:id?'PUT':'POST',body:JSON.stringify(payload)});facilityDialog.close();toast(id?'Account updated':'Account added');await refresh()}catch(error){toast(error.message)}finally{$('#facility-type').disabled=false;$('#facility-owed').disabled=false}});
 
-function resetForm() {
-  $('#transaction-form').reset(); $('#transaction-id').value = ''; $('#transaction-date').value = iso(new Date());
-  $('#category').value = defaults[state.type]; $('#payment-method').value = 'debit'; $('#cancel-edit').hidden = true; $('#draft-note').hidden = true;
-  $('#save-label').textContent = `Save ${state.type}`; clearFormErrors(); renderExpenseFacilities();
-}
-
-function fillEdit(item) {
-  setType(item.transaction_type, {announce:false}); $('#transaction-id').value = item.id; $('#amount').value = (item.amount_minor / 100).toFixed(2);
-  $('#description').value = item.description; $('#category').value = item.category; $('#transaction-date').value = item.transaction_date; $('#note').value = item.note || '';
-  $('#payment-method').value = item.payment_method || 'debit'; renderExpenseFacilities(); if (item.credit_facility_id) $('#expense-facility').value = String(item.credit_facility_id);
-  $('#cancel-edit').hidden = false; $('#save-label').textContent = 'Update transaction'; $('#transaction-form').scrollIntoView({behavior:'smooth',block:'center'}); $('#amount').focus();
-}
-
-$('#transaction-form').addEventListener('submit', async event => {
-  event.preventDefault(); clearFormErrors(); const errors = validateTransactionForm();
-  if (errors.length) { showFormErrors(errors); toast(errors[0].message); return; }
-  try {
-    const id = $('#transaction-id').value; const method = state.type === 'expense' ? $('#payment-method').value : null;
-    const payload = {transaction_type:state.type,amount_minor:parseMinor($('#amount').value),currency:'AUD',description:$('#description').value.trim(),category:$('#category').value.trim(),transaction_date:$('#transaction-date').value,note:$('#note').value.trim()||null,payment_method:method,credit_facility_id:method && ['credit','pay_later'].includes(method) ? Number($('#expense-facility').value) : null};
-    await api(id ? `/api/transactions/${id}` : '/api/transactions', {method:id?'PUT':'POST',headers:id?{}:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(payload)});
-    toast(id ? 'Transaction updated' : `${state.type === 'income' ? 'Income' : state.type[0].toUpperCase()+state.type.slice(1)} saved`); resetForm(); await refresh();
-  } catch (error) { showFormErrors(error.errors || []); toast(error.message); }
-});
-
-$$('.type-tab').forEach(button => button.addEventListener('click', () => setType(button.dataset.type)));
-$('#payment-method').addEventListener('change', renderExpenseFacilities); $('#cancel-edit').addEventListener('click', resetForm);
-$('#activity-list').addEventListener('click', async event => {
-  if (event.target.dataset.exampleAction) { toast(`${event.target.textContent} controls appear here once you save a real transaction`); return; }
-  const edit = event.target.dataset.edit, remove = event.target.dataset.delete;
-  if (edit) fillEdit(state.transactions.find(item => item.id === Number(edit)));
-  if (remove && confirm('Delete this transaction? Any linked credit balance will be adjusted.')) {
-    try { await api(`/api/transactions/${remove}`,{method:'DELETE'}); toast('Transaction deleted'); await refresh(); } catch (error) { toast(error.message); }
-  }
-});
-$('#upcoming-list').addEventListener('click', async event => {
-  const record = event.target.dataset.record, skip = event.target.dataset.skip;
-  try {
-    if (record) { const [id,due]=record.split('|'); await api(`/api/occurrences/${id}/${due}/record`,{method:'POST',body:'{}'}); toast('Planned item recorded as an actual transaction'); }
-    if (skip) { const [id,due]=skip.split('|'); if (!confirm('Skip this occurrence?')) return; await api(`/api/occurrences/${id}/${due}/skip`,{method:'POST'}); toast('Occurrence skipped'); }
-    if (record || skip) await refresh();
-  } catch (error) { toast(error.message); }
-});
-
-function changeMonth(delta) { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1); refresh(); }
-$('#previous-month').addEventListener('click', () => changeMonth(-1)); $('#next-month').addEventListener('click', () => changeMonth(1));
-
-const calendarDialog = $('#calendar-dialog');
-async function openCalendar() {
-  try { const data = await api(`/api/calendar/${monthKey()}`); state.calendarItems = data.items; renderCalendar(); calendarDialog.showModal(); } catch (error) { toast(error.message); }
-}
-function renderCalendar() {
-  const year = state.month.getFullYear(), month = state.month.getMonth(), days = new Date(year, month + 1, 0).getDate();
-  const offset = (new Date(year, month, 1).getDay() + 6) % 7; const grouped = Object.groupBy ? Object.groupBy(state.calendarItems, item => item.due_date) : state.calendarItems.reduce((all,item)=>((all[item.due_date]??=[]).push(item),all),{});
-  $('#calendar-title').textContent = state.month.toLocaleDateString('en-AU',{month:'long',year:'numeric'});
-  let cells = '<span class="calendar-spacer" aria-hidden="true"></span>'.repeat(offset);
-  for (let day=1; day<=days; day++) { const key=`${monthKey()}-${String(day).padStart(2,'0')}`, items=grouped[key]||[]; const labels=items.map(item=>({income:'Expected income',bill:'Planned bill',savings:'Planned savings'}[item.transaction_type])).join(', '); const markers=items.map(item=>`<i class="marker ${item.transaction_type}" title="${{income:'Expected income',bill:'Planned bill',savings:'Planned savings'}[item.transaction_type]}"></i>`).join(''); cells += `<button class="calendar-day" data-calendar-date="${key}" aria-label="${day}${labels?`: ${labels}`:''}"><span>${day}</span><span class="day-markers" aria-hidden="true">${markers}</span></button>`; }
-  $('#calendar-grid').innerHTML = cells; $('#calendar-day-detail').textContent = 'Choose a marked day to see its plans.';
-}
-$('#current-month').addEventListener('click', openCalendar); $('.calendar-dialog .dialog-close').addEventListener('click', () => calendarDialog.close());
-calendarDialog.addEventListener('click', event => { if (event.target === calendarDialog) calendarDialog.close(); });
-$('#calendar-grid').addEventListener('click', event => { const button=event.target.closest('[data-calendar-date]'); if(!button)return; const items=state.calendarItems.filter(item=>item.due_date===button.dataset.calendarDate); $('#calendar-day-detail').innerHTML=items.length?`<strong>${new Date(`${button.dataset.calendarDate}T00:00`).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</strong>${items.map(item=>`<span>${escapeHtml(item.description)} · ${money(item.amount_minor)}</span>`).join('')}`:'No planned recurring items on this day.'; });
-
-const recurringDialog=$('#recurring-dialog'); $('#add-recurring').addEventListener('click',()=>{recurringDialog.showModal();$('#next-due').value=iso(new Date())});
-$$('.recurring-tab').forEach(button=>button.addEventListener('click',()=>{state.recurringType=button.dataset.type;$$('.recurring-tab').forEach(b=>b.classList.toggle('active',b===button));$('#recurring-category').value=defaults[state.recurringType]}));
-$('#recurring-form').addEventListener('submit',async event=>{event.preventDefault();try{const due=$('#next-due').value;await api('/api/recurring',{method:'POST',body:JSON.stringify({transaction_type:state.recurringType,amount_minor:parseMinor($('#recurring-amount').value),currency:'AUD',description:$('#recurring-description').value.trim(),category:$('#recurring-category').value.trim(),frequency:$('#frequency').value,start_date:due,next_due_date:due,end_date:null,active:true,automated_externally:$('#automated').checked,note:null})});recurringDialog.close();event.target.reset();toast('Recurring item added');await refresh()}catch(error){toast(error.message)}});
-
-const facilityDialog=$('#facility-dialog'); $('#add-facility').addEventListener('click',()=>facilityDialog.showModal());
-$('#facility-form').addEventListener('submit',async event=>{event.preventDefault();try{const owedText=$('#facility-owed').value.trim()||'0';const owedMinor=Number(owedText)===0?0:parseMinor(owedText,'Amount owed');await api('/api/credit-facilities',{method:'POST',body:JSON.stringify({name:$('#facility-name').value.trim(),facility_type:$('#facility-type').value,credit_limit_minor:parseMinor($('#facility-limit').value,'Credit limit'),amount_owed_minor:owedMinor,currency:'AUD',note:$('#facility-note').value.trim()||null})});facilityDialog.close();event.target.reset();$('#facility-owed').value='0.00';toast('Credit account added');await refresh()}catch(error){toast(error.message)}});
-const paymentDialog=$('#payment-dialog');
-$('#facility-list').addEventListener('click',event=>{const id=Number(event.target.dataset.payment);if(!id)return;const facility=state.facilities.find(item=>item.id===id);$('#payment-facility-id').value=id;$('#payment-title').textContent=`${facility.name} payment`;$('#payment-balance').textContent=`Currently owed ${money(facility.amount_owed_minor)} · ${money(facility.available_credit_minor)} available`;$('#payment-amount').value='';$('#payment-date').value=iso(new Date());paymentDialog.showModal()});
-$('#payment-form').addEventListener('submit',async event=>{event.preventDefault();try{const id=$('#payment-facility-id').value;await api(`/api/credit-facilities/${id}/payments`,{method:'POST',body:JSON.stringify({amount_minor:parseMinor($('#payment-amount').value,'Payment'),transaction_date:$('#payment-date').value,note:$('#payment-note').value.trim()||null})});paymentDialog.close();event.target.reset();toast('Payment recorded');await refresh()}catch(error){toast(error.message)}});
+const paymentDialog=$('#payment-dialog'),balanceDialog=$('#balance-dialog');
+$('#facility-list').addEventListener('click',async event=>{const payment=Number(event.target.dataset.payment),edit=Number(event.target.dataset.facilityEdit),balance=Number(event.target.dataset.balanceEdit),remove=Number(event.target.dataset.facilityDelete),facility=state.facilities.find(item=>item.id===(payment||edit||balance||remove)),safeLoanDate=facility?.facility_type==='fixed_loan'&&facility.balance_as_of_date>iso(new Date())?facility.balance_as_of_date:iso(new Date());if(payment){$('#payment-facility-id').value=payment;$('#payment-title').textContent=`${facility.name} payment`;$('#payment-balance').textContent=facility.facility_type==='fixed_loan'?`Estimated balance ${money(facility.amount_owed_minor)} as of ${facility.balance_as_of_date}`:`Currently owed ${money(facility.amount_owed_minor)} · ${money(facility.available_credit_minor)} available`;$('#payment-amount').value='';$('#payment-date').value=safeLoanDate;paymentDialog.showModal()}if(edit)openFacility(facility);if(balance){$('#balance-facility-id').value=balance;$('#balance-title').textContent=`Edit ${facility.name} balance`;$('#balance-amount').value=(facility.amount_owed_minor/100).toFixed(2);$('#balance-date').value=safeLoanDate;$('#balance-note').value='';balanceDialog.showModal()}if(remove&&confirm(`Delete ${facility.name}? Historical transactions stay in Recent Activity and any recurring link is safely removed.`)){try{await api(`/api/credit-facilities/${remove}`,{method:'DELETE'});toast('Account removed; history preserved');await refresh()}catch(error){toast(error.message)}}});
+$('#payment-form').addEventListener('submit',async event=>{event.preventDefault();try{const id=$('#payment-facility-id').value;await api(`/api/credit-facilities/${id}/payments`,{method:'POST',body:JSON.stringify({amount_minor:parseMinor($('#payment-amount').value,'Payment'),transaction_date:$('#payment-date').value,note:$('#payment-note').value.trim()||null})});paymentDialog.close();event.target.reset();toast('Payment recorded once in cashflow');await refresh()}catch(error){toast(error.message)}});
+$('#balance-form').addEventListener('submit',async event=>{event.preventDefault();try{const id=$('#balance-facility-id').value;await api(`/api/credit-facilities/${id}/reconcile`,{method:'POST',body:JSON.stringify({amount_owed_minor:parseMinor($('#balance-amount').value,'Balance',true),balance_as_of_date:$('#balance-date').value,note:$('#balance-note').value.trim()||null})});balanceDialog.close();toast('Estimated loan balance reconciled');await refresh()}catch(error){toast(error.message)}});
 
 function voiceInput(){const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition){toast('Voice recognition is unavailable. Use your phone keyboard’s dictation microphone instead.');$('#description').focus();return}const recognition=new Recognition();recognition.lang='en-AU';recognition.interimResults=false;$('#voice-button').textContent='Listening…';recognition.onresult=async event=>{try{const parsed=await api('/api/parse',{method:'POST',body:JSON.stringify({text:event.results[0][0].transcript})});setType(parsed.transaction_type,{announce:false});if(parsed.amount_minor)$('#amount').value=(parsed.amount_minor/100).toFixed(2);$('#description').value=parsed.description||'';$('#category').value=parsed.category;$('#draft-note').hidden=false;$('#amount').focus();toast('Voice draft ready — please check it')}catch(error){toast(error.message)}};recognition.onerror=()=>toast('Microphone input was not available. Nothing was saved.');recognition.onend=()=>{$('#voice-button').innerHTML='<span aria-hidden="true">●</span> Speak'};recognition.start()}
 $('#voice-button').addEventListener('click',voiceInput);$('#theme-toggle').addEventListener('click',()=>{const current=document.documentElement.dataset.theme;document.documentElement.dataset.theme=current==='dark'?'light':'dark';localStorage.setItem('theme',document.documentElement.dataset.theme)});if(localStorage.getItem('theme'))document.documentElement.dataset.theme=localStorage.getItem('theme');
-$('#restore-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;if(!confirm('Restore this backup? Current transactions, recurring items and credit accounts will be replaced.')){event.target.value='';return}try{const body=await file.text();await api('/api/restore?confirm=true',{method:'POST',body});toast('Backup restored');await refresh()}catch(error){toast(error.message)}finally{event.target.value=''}});
+$('#restore-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;if(!confirm('Restore this backup? Current transactions, recurring items and accounts will be replaced.')){event.target.value='';return}try{const body=await file.text();await api('/api/restore?confirm=true',{method:'POST',body});toast('Backup restored');await refresh()}catch(error){toast(error.message)}finally{event.target.value=''}});
+const resetDialog=$('#reset-dialog');$('#open-reset').addEventListener('click',()=>{$('#reset-confirmation').value='';$('#reset-submit').disabled=true;resetDialog.showModal()});$('#reset-confirmation').addEventListener('input',event=>{$('#reset-submit').disabled=event.target.value!=='RESET'});$('#reset-form').addEventListener('submit',async event=>{event.preventDefault();if($('#reset-confirmation').value!=='RESET')return;try{await api('/api/reset',{method:'POST',body:JSON.stringify({confirmation:'RESET'})});resetDialog.close();toast('All financial data reset');resetForm();await refresh()}catch(error){toast(error.message)}});
 
+$$('.form-close').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
 resetForm(); setType('expense',{announce:false}); refresh(); if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
