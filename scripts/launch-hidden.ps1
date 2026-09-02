@@ -1,12 +1,14 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $runScript = Join-Path $projectRoot 'run.ps1'
-$appUrl = 'http://localhost:8765'
-$healthUrl = 'http://127.0.0.1:8765/api/health'
+$appUrl = 'http://localhost:8876'
+$healthUrl = 'http://127.0.0.1:8876/api/health'
+$expectedApplication = 'olos-ai-mini-budget-planner'
 
 try {
     $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
-    if ($response.StatusCode -eq 200) {
+    $health = $response.Content | ConvertFrom-Json
+    if ($response.StatusCode -eq 200 -and $health.application -eq $expectedApplication) {
         Start-Process -FilePath $appUrl
         exit 0
     }

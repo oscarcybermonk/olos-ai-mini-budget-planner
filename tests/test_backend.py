@@ -29,6 +29,12 @@ class BudgetApiTests(unittest.TestCase):
         payload = {"transaction_type":"expense","amount_minor":2250,"currency":"AUD","description":"Lunch","category":"Dining","transaction_date":"2026-08-10","note":None}
         payload.update(overrides); return payload
 
+    def test_health_identifies_only_the_public_mini_application(self):
+        self.assertEqual(
+            self.client.get('/api/health').json(),
+            {'status':'ok','application':'olos-ai-mini-budget-planner','currency':'AUD','storage':'local-sqlite'},
+        )
+
     def recurring(self, **overrides):
         payload = {"transaction_type":"bill","amount_minor":8000,"currency":"AUD","description":"Phone","category":"Phone/Internet","frequency":"monthly","interval_count":1,"start_date":"2026-08-15","next_due_date":"2026-08-15","end_date":None,"active":True,"automated_externally":True,"note":None}
         payload.update(overrides); return payload

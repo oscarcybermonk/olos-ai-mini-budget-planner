@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node --check frontend/assets/app.js",
     "lint": "node --check frontend/assets/app.js",
-    "test:frontend": "node --check frontend/assets/app.js && node --test tests/frontend.test.mjs"
+    "test:frontend": "node --check frontend/assets/app.js && node --test tests/frontend.test.mjs tests/isolation.test.mjs"
   },
   "type": "module"
 }

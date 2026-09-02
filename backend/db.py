@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = Path(os.environ.get("OLOS_BUDGET_DATA_DIR", APP_ROOT / "data"))
+DATA_DIR = Path(os.environ.get("OLOS_MINI_DATA_DIR", APP_ROOT / ".mini-runtime" / "data"))
 DB_PATH = DATA_DIR / "olos-mini-budget.sqlite3"
 
 DEFAULT_CATEGORIES = {

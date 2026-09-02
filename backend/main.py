@@ -18,7 +18,8 @@ from .db import APP_ROOT, DB_PATH, DEFAULT_CATEGORIES, connect, init_db, transac
 from .domain import daily_simple_interest_minor, parse_transaction_text, projected_dates
 from .schemas import BackupIn, CreditFacilityIn, CreditPaymentIn, LoanBalanceIn, RecordOccurrenceIn, RecurringIn, ResetDataIn, TransactionIn, VoiceIn
 
-app = FastAPI(title="Olos Personal Budget Tracker", version="1.0.0", docs_url="/api/docs", redoc_url=None)
+APP_INSTANCE_ID = "olos-ai-mini-budget-planner"
+app = FastAPI(title="Olos-AI Mini Budget Planner", version="1.0.0", docs_url="/api/docs", redoc_url=None)
 STATIC_DIR = APP_ROOT / "frontend"
 
 
@@ -62,7 +63,7 @@ async def unexpected_error(_request: Request, exc: Exception):
 @app.get("/api/health")
 def health():
     with connect() as db: db.execute("SELECT 1").fetchone()
-    return {"status": "ok", "currency": "AUD", "database": str(DB_PATH)}
+    return {"status": "ok", "application": APP_INSTANCE_ID, "currency": "AUD", "storage": "local-sqlite"}
 
 
 @app.get("/api/categories")

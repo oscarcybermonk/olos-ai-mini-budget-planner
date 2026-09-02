@@ -26,7 +26,7 @@ The first usable local version includes:
 
 ## Architecture
 
-FastAPI serves both a REST API and the dependency-free production web interface. SQLite persistence is isolated in `data/`. Startup applies safe schema migration for facility types plus additive columns for payment methods, recurring intervals, loan links and balance events without resetting existing records. Domain helpers own exact money conversion, recurrence advancement, daily fixed-loan simple interest and voice-text parsing. Recurring database rows hold schedule definitions; only user-recorded or skipped occurrences are persisted.
+FastAPI serves both a REST API and the dependency-free production web interface. SQLite persistence is isolated in the public project's `.mini-runtime/data/` directory. Startup applies safe schema migration for facility types plus additive columns for payment methods, recurring intervals, loan links and balance events without resetting existing records. Domain helpers own exact money conversion, recurrence advancement, daily fixed-loan simple interest and voice-text parsing. Recurring database rows hold schedule definitions; only user-recorded or skipped occurrences are persisted.
 
 The normal user path is one Python server and one browser tab. No Node process is needed for normal use.
 
@@ -49,6 +49,6 @@ There is no bank connection, reconciliation, tax logic, investing or trading, ac
 
 Use the tool with real personal workflows, then prioritise only observed friction. Likely candidates are optional local-network access protection, category shortcuts, and richer backup review. Bank or tax expansion should remain a separate, explicitly scoped project.
 
-## Olos Personal Budget Tracker Apple Client
+## Possible future Apple client
 
 A plausible next phase is an offline-first SwiftUI client for iPhone, iPad and macOS calling the existing local REST API, with native speech capture and a future optional private sync mechanism. A Watch companion should remain tiny: quick expense/income/savings and voice entry, payment-method/account choice where practical, marking a recurring item paid, and glances at available cash and upcoming commitments. No SwiftUI, WatchKit, cloud relay or Apple sync is implemented here.

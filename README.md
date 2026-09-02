@@ -1,4 +1,4 @@
-# Olos Personal Budget Tracker
+# Olos-AI Mini Budget Planner
 
 A small, local-first personal budget and cashflow planner for one person. It records income, expenses, bills and savings; projects recurring commitments; optionally tracks simple credit/pay-later balances; and shows what is approximately available after known plans. It is not accounting, tax, banking, investing or financial-advice software.
 
@@ -16,7 +16,7 @@ FastAPI REST API
 responsive HTML/CSS/JavaScript PWA
 ```
 
-The frontend and API share one local server. The API remains platform-neutral for a possible native Apple client.
+The frontend and API share one local server. The raw HTML file has no localhost fallback link, and the launcher verifies this project's identity before opening a browser. The API remains platform-neutral for a possible native Apple client.
 
 Quick Add keeps an entered amount, description, date and note when the transaction type changes, while clearly relabelling the entry. A default category changes to the new type; a custom category/tag is preserved. Expense categories include lightweight `Work`, `Business`, and `Olos-AI` options.
 
@@ -32,7 +32,7 @@ From PowerShell in this folder:
 .\run.ps1
 ```
 
-Or double-click `run.bat`. The first run creates a private `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8765](http://localhost:8765). Stop it with `Ctrl+C`. Run `install-desktop-shortcut.ps1` once to create the **Olos Personal Budget Tracker** desktop launcher; it starts the local server and opens the app automatically.
+Or double-click `run.bat`. The first run creates this project's own `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8876](http://localhost:8876). Stop it with `Ctrl+C`. Run `install-desktop-shortcut.ps1` once to create the clearly named **Olos-AI Mini Budget Planner** desktop launcher.
 
 No sample financial transactions are created.
 
@@ -44,7 +44,7 @@ Localhost-only is the default. To deliberately allow access on the current trust
 .\run.ps1 -Lan
 ```
 
-The launcher prints a phone URL such as `http://192.168.1.20:8765`. Keep the computer and iPhone on the same trusted Wi-Fi, allow Python through Windows Firewall for **private networks only** if prompted, and enter the printed URL in Safari. Do not enable LAN mode on public Wi-Fi. Stop the server when finished.
+The launcher prints a phone URL such as `http://192.168.1.20:8876`. Keep the computer and iPhone on the same trusted Wi-Fi, allow Python through Windows Firewall for **private networks only** if prompted, and enter the printed URL in Safari. Do not enable LAN mode on public Wi-Fi. Stop the server when finished.
 
 The app does not create a public internet listener or configure port forwarding. A private overlay network such as Tailscale can carry the same HTTP connection, but is not required or configured by this app.
 
@@ -55,10 +55,10 @@ Browser speech recognition support varies. If the Speak button is unavailable or
 The live database is clearly located at:
 
 ```text
-data\olos-mini-budget.sqlite3
+.mini-runtime\data\olos-mini-budget.sqlite3
 ```
 
-The `data` directory is ignored by Git. Use **CSV** in Recent activity for a transaction export or **Backup** for a complete JSON backup. Files are downloaded by the browser and never uploaded anywhere. Under **Data and backup tools**, a JSON backup can be restored after an explicit confirmation. Restore replaces current financial records in one database transaction and rejects the same backup if submitted twice.
+The `.mini-runtime` directory is specific to this public project and ignored by Git. This project does not read external application data namespaces. Use **CSV** in Recent activity for a transaction export or **Backup** for a complete JSON backup. Files are downloaded by the browser and never uploaded anywhere. Under **Data and backup tools**, a JSON backup can be restored after an explicit confirmation. Restore replaces current financial records in one database transaction and rejects the same backup if submitted twice.
 
 Back up the JSON file somewhere you control. Closing the server before directly copying the SQLite file is also safe.
 
@@ -98,7 +98,7 @@ Interest increases only the liability estimate; it does not create a cash expens
 
 ## API
 
-Interactive local API documentation is at [http://localhost:8765/api/docs](http://localhost:8765/api/docs). Principal endpoints cover transactions, recurring rules, 30-day and calendar projections, occurrence recording/skipping, credit facilities and payments, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
+Interactive local API documentation is at [http://localhost:8876/api/docs](http://localhost:8876/api/docs). Principal endpoints cover transactions, recurring rules, 30-day and calendar projections, occurrence recording/skipping, credit facilities and payments, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
 
 Inputs are validated with Pydantic, SQL uses parameters, user text is escaped in the browser, CORS is not enabled, and the database file is not served. No secrets are stored. LAN mode has no account system, so it must only be used on a trusted private network.
 
