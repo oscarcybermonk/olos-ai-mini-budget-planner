@@ -31,6 +31,12 @@ class BudgetApiTests(unittest.TestCase):
         payload = {"transaction_type":"expense","amount_minor":2250,"currency":"AUD","description":"Lunch","category":"Dining","transaction_date":"2026-08-10","note":None}
         payload.update(overrides); return payload
 
+    def test_health_identifies_only_the_hackathon_application(self):
+        self.assertEqual(
+            self.client.get('/api/health').json(),
+            {'status':'ok','application':'olos-ai-mini-budget-planner-hackathon','currency':'AUD','storage':'local-sqlite'},
+        )
+
     def recurring(self, **overrides):
         payload = {"transaction_type":"bill","amount_minor":8000,"currency":"AUD","description":"Phone","category":"Phone/Internet","frequency":"monthly","interval_count":1,"start_date":"2026-08-15","next_due_date":"2026-08-15","end_date":None,"active":True,"automated_externally":True,"note":None}
         payload.update(overrides); return payload
@@ -61,13 +67,14 @@ class BudgetApiTests(unittest.TestCase):
 
     def test_demo_mode_isolates_sessions_reseeds_reset_and_leaves_local_db_untouched(self):
         demo_dir=Path(self.temp.name)/'demo-sessions'
-        settings={'OLOS_DEMO_MODE':'true','OLOS_DEMO_DATA_DIR':str(demo_dir)}
+        settings={'OLOS_HACKATHON_DEMO_MODE':'true','OLOS_HACKATHON_DEMO_DATA_DIR':str(demo_dir)}
         with patch.dict(os.environ,settings,clear=False):
             with TestClient(app) as first, TestClient(app) as second:
                 health=first.get('/api/health')
                 self.assertEqual(health.json()['storage'],'session-isolated-demo')
-                self.assertNotIn('olos_demo_session',health.cookies)
-                self.assertEqual(first.get('/api/runtime').json(),{'mode':'demo','disposable':True,'currency':'AUD'})
+                self.assertNotIn('olos_hackathon_demo_session',health.cookies)
+                self.assertEqual(health.json()['application'],'olos-ai-mini-budget-planner-hackathon')
+                self.assertEqual(first.get('/api/runtime').json(),{'application':'olos-ai-mini-budget-planner-hackathon','mode':'demo','disposable':True,'currency':'AUD'})
                 self.assertEqual(len(first.get('/api/transactions').json()),3)
                 self.assertEqual(len(second.get('/api/transactions').json()),3)
                 created=first.post('/api/transactions',json=self.transaction(description='First browser only',transaction_date=date.today().isoformat()))

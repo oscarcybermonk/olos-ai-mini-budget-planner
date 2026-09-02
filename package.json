@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node --check frontend/assets/app.js && node --check frontend/assets/webmcp.js",
     "lint": "node --check frontend/assets/app.js && node --check frontend/assets/webmcp.js",
-    "test:frontend": "node --check frontend/assets/app.js && node --check frontend/assets/webmcp.js && node --test tests/frontend.test.mjs tests/webmcp.test.mjs"
+    "test:frontend": "node --check frontend/assets/app.js && node --check frontend/assets/webmcp.js && node --test tests/frontend.test.mjs tests/isolation.test.mjs tests/webmcp.test.mjs"
   },
   "type": "module"
 }

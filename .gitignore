@@ -66,6 +66,7 @@ next-env.d.ts
 
 # local financial data and Python artefacts
 /data/
+/\.hackathon-runtime/
 /backups/
 /exports/
 *.sqlite

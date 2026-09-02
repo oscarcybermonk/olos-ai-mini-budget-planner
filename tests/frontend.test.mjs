@@ -18,16 +18,17 @@ test('one page has accessible transaction entry and mobile metadata',()=>{
 test('absolute-path PowerShell launch resolves the backend from the project root',()=>{
   assert.match(launcher,/uvicorn backend\.main:app --app-dir \$projectRoot/);
   assert.match(launcher,/scripts\\open-when-ready\.ps1/);assert.match(launcher,/\[switch\]\$OpenBrowser/);
-  assert.match(shortcutInstaller,/Olos Personal Budget Tracker\.lnk/);assert.match(shortcutInstaller,/olos-personal-budget\.ico/);
+  assert.match(shortcutInstaller,/Olos-AI Mini Budget Planner - Hackathon\.lnk/);assert.match(shortcutInstaller,/olos-mini-budget\.ico/);
   assert.match(shortcutInstaller,/wscript\.exe/);assert.match(shortcutInstaller,/launch-hidden\.vbs/);
-  assert.match(hiddenLauncher,/127\.0\.0\.1:8765\/api\/health/);assert.match(hiddenLauncher,/WindowStyle Hidden/);
+  assert.match(hiddenLauncher,/127\.0\.0\.1:8876\/api\/health/);assert.match(hiddenLauncher,/olos-ai-mini-budget-planner-hackathon/);assert.match(hiddenLauncher,/WindowStyle Hidden/);
   assert.match(hiddenLauncherVbs,/shell\.Run command, 0, False/);
 });
 
-test('opening raw HTML explains that the desktop launcher is required',()=>{
+test('opening raw HTML cannot redirect into another local application',()=>{
   assert.match(html,/window\.location\.protocol === 'file:'/);
-  assert.match(html,/Use the Olos desktop launcher/);
-  assert.match(html,/http:\/\/localhost:8765/);
+  assert.match(html,/Start this Mini Budget Planner project/);
+  assert.match(html,/another local application must never be opened by mistake/);
+  assert.doesNotMatch(html,/<a\s+href=["']http:\/\/localhost/i);
 });
 
 test('Quick Add preserves content type when idempotency headers are added',()=>{
@@ -73,11 +74,11 @@ test('fixed loans can be saved first and linked later',()=>{
   assert.match(js,/formatted=raw\.replace\(\/\^\\\$\\s\*\//);assert.match(js,/\\d\{1,3\}.*\\d\{3\}/);assert.match(js,/formatted\.replace\(\/,\/g,''\)/);
 });
 
-test('local Olos identity is used by the page and PWA',()=>{
-  assert.match(html,/assets\/olos-ecosystem-logo-128\.png/);assert.match(html,/OLOS AI/);assert.match(html,/Personal Budget Tracker/);
-  assert.ok(fs.statSync('frontend/assets/olos-personal-budget-192.png').size>1000);
-  assert.ok(fs.statSync('frontend/assets/olos-personal-budget-512.png').size>1000);
-  assert.ok(fs.statSync('frontend/assets/olos-personal-budget.ico').size>1000);
+test('isolated Mini identity is used by the page and PWA',()=>{
+  assert.match(html,/assets\/olos-ecosystem-logo-128\.png/);assert.match(html,/OLOS AI/);assert.match(html,/Mini Budget Planner/);
+  assert.ok(fs.statSync('frontend/assets/olos-mini-budget-192.png').size>1000);
+  assert.ok(fs.statSync('frontend/assets/olos-mini-budget-512.png').size>1000);
+  assert.ok(fs.statSync('frontend/assets/olos-mini-budget.ico').size>1000);
   assert.deepEqual(manifest.icons.map(icon=>icon.sizes),['192x192','512x512']);
   assert.match(css,/--signal/);assert.match(css,/\.metric\.savings::before/);
 });
@@ -102,7 +103,7 @@ test('dark mode defines explicit form and autofill surfaces',()=>{
 });
 
 test('PWA manifest is local and standalone',()=>{
-  assert.equal(manifest.display,'standalone');assert.equal(manifest.start_url,'/');assert.equal(manifest.name,'Olos Personal Budget Tracker');
+  assert.equal(manifest.display,'standalone');assert.equal(manifest.start_url,'/');assert.equal(manifest.name,'Olos-AI Mini Budget Planner');
 });
 
 test('user text is escaped before rendering',()=>{

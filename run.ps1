@@ -1,6 +1,6 @@
 param(
     [switch]$Lan,
-    [int]$Port = 8765,
+    [int]$Port = 8876,
     [switch]$OpenBrowser
 )
 
@@ -16,7 +16,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 
 $hostAddress = if ($Lan) { '0.0.0.0' } else { '127.0.0.1' }
 Write-Host ''
-Write-Host 'Olos Personal Budget Tracker'
+Write-Host 'Olos-AI Mini Budget Planner (Hackathon)'
 Write-Host "Desktop: http://localhost:$Port"
 if ($Lan) {
     $localAddress = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue |

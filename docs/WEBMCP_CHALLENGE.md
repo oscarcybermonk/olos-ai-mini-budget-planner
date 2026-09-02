@@ -7,7 +7,7 @@ Olos-AI Mini Budget Planner demonstrates one deterministic web application with 
 - Pre-WebMCP baseline: `3b937556a1c26116ec59487f0e30d2a86e42a428`
 - Development branch: `hackathon/webmcp`
 - Implementation started: 1 September 2026
-- Stable `main` is not modified by challenge work.
+- The WebMCP feature work remains confined to this branch; shared publication-safety fixes may also be applied independently to `main`.
 
 ## Current WebMCP assumptions
 
@@ -66,16 +66,16 @@ Schemas reject additional properties, constrain IDs/enums/ranges, use ISO dates,
 
 ## Hosted demo design
 
-`OLOS_DEMO_MODE=true` activates browser-session isolation:
+`OLOS_HACKATHON_DEMO_MODE=true` activates browser-session isolation:
 
 1. The server creates a random UUID cookie with `HttpOnly`, `SameSite=Lax`, and `Secure` under HTTPS.
-2. The request context maps that opaque ID to one SQLite file under `OLOS_DEMO_DATA_DIR`.
+2. The request context maps that opaque ID to one SQLite file under `OLOS_HACKATHON_DEMO_DATA_DIR`.
 3. A new file receives schema plus small synthetic transactions, recurring items, one card, and one fixed loan.
 4. All API calls, UI actions, and WebMCP tools in that browser share the same session database.
 5. Reset removes that session's changes and reseeds its synthetic story.
 6. Files older than 24 hours are removed from the demo-only directory; Render's ephemeral filesystem also clears on restart or spin-down.
 
-Normal local startup does not enable this middleware and continues to use the ignored `data` directory. No production database, backup, export, or personal amount is copied into the demo seed.
+Normal local startup does not enable this middleware and uses the ignored, project-specific `.hackathon-runtime` directory. No external database, backup, export, or personal amount is copied into the demo seed.
 
 ## Safety decisions
 

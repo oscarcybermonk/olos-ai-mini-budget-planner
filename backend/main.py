@@ -19,7 +19,8 @@ from .demo import DEMO_COOKIE, cleanup_stale_sessions, demo_data_dir, demo_mode_
 from .domain import daily_simple_interest_minor, parse_transaction_text, projected_dates
 from .schemas import BackupIn, CreditFacilityIn, CreditPaymentIn, LoanBalanceIn, RecordOccurrenceIn, RecurringIn, ResetDataIn, TransactionIn, VoiceIn
 
-app = FastAPI(title="Olos Personal Budget Tracker", version="1.0.0", docs_url="/api/docs", redoc_url=None)
+APP_INSTANCE_ID = "olos-ai-mini-budget-planner-hackathon"
+app = FastAPI(title="Olos-AI Mini Budget Planner", version="1.0.0", docs_url="/api/docs", redoc_url=None)
 STATIC_DIR = APP_ROOT / "frontend"
 
 
@@ -103,13 +104,13 @@ async def unexpected_error(_request: Request, exc: Exception):
 def health():
     with connect() as db: db.execute("SELECT 1").fetchone()
     storage = "session-isolated-demo" if demo_mode_enabled() else "local-sqlite"
-    return {"status": "ok", "currency": "AUD", "storage": storage}
+    return {"status": "ok", "application": APP_INSTANCE_ID, "currency": "AUD", "storage": storage}
 
 
 @app.get("/api/runtime")
 def runtime():
     demo = demo_mode_enabled()
-    return {"mode": "demo" if demo else "local", "disposable": demo, "currency": "AUD"}
+    return {"application": APP_INSTANCE_ID, "mode": "demo" if demo else "local", "disposable": demo, "currency": "AUD"}
 
 
 @app.get("/api/categories")

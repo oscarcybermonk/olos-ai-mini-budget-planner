@@ -1,6 +1,6 @@
 # Olos-AI Mini Budget Planner
 
-**Olos Personal Budget Tracker** — one deterministic budget application with two first-class interfaces: a calm visual UI for people and structured WebMCP tools for compatible agents.
+**Olos-AI Mini Budget Planner** is one deterministic budget application with two first-class interfaces: a calm visual UI for people and structured WebMCP tools for compatible agents.
 
 A small, local-first personal budget and cashflow planner for one person. It records income, expenses, bills and savings; projects recurring commitments; optionally tracks simple credit/pay-later balances; and shows what is approximately available after known plans. It is not accounting, tax, banking, investing or financial-advice software.
 
@@ -31,7 +31,7 @@ flowchart LR
   Engine --> DB[(SQLite budget data)]
 ```
 
-The WebMCP file is an adapter, not a second budget engine. The frontend and API share one server; normal personal mode remains local-first.
+The WebMCP file is an adapter, not a second budget engine. The frontend and API share one server; normal local Mini mode remains local-first.
 
 ## WebMCP tools
 
@@ -65,7 +65,7 @@ From PowerShell in this folder:
 .\run.ps1
 ```
 
-Or double-click `run.bat`. The first run creates a private `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8765](http://localhost:8765). Stop it with `Ctrl+C`. Run `install-desktop-shortcut.ps1` once to create the **Olos Personal Budget Tracker** desktop launcher; it starts the local server and opens the app automatically.
+Or double-click `run.bat`. The first run creates this project's own `.venv`, installs the pinned Python requirements, creates the schema and default categories, then starts the app. Open [http://localhost:8876](http://localhost:8876). Stop it with `Ctrl+C`. Run `install-desktop-shortcut.ps1` once to create the clearly named **Olos-AI Mini Budget Planner - Hackathon** desktop launcher.
 
 No sample financial transactions are created.
 
@@ -73,8 +73,10 @@ No sample financial transactions are created.
 
 Normal mode and hosted demo mode are deliberately separate:
 
-- **Local personal mode** uses `data\olos-mini-budget.sqlite3`, creates no demo transactions, and stays on the user's computer.
-- **Hosted demo mode** is enabled only with `OLOS_DEMO_MODE=true`. Each browser receives an opaque session cookie and a separate ephemeral SQLite database seeded only with a small synthetic story. Reset reseeds that one session; inactive session files expire. No local or real financial data is deployed.
+- **Local Mini mode** uses `.hackathon-runtime\data\olos-mini-budget-hackathon.sqlite3`, creates no demo transactions, and is namespaced specifically to this project.
+- **Hosted demo mode** is enabled only with `OLOS_HACKATHON_DEMO_MODE=true`. Each browser receives an opaque session cookie and a separate ephemeral SQLite database under `OLOS_HACKATHON_DEMO_DATA_DIR`, seeded only with a small synthetic story. Reset reseeds that one session; inactive session files expire. No local or real financial data is deployed.
+
+This public project deliberately does not read generic or external-application data environment variables. Its default port, database filename, runtime directory, cookie, launcher name, and application identity are all project-specific. The launchers verify that identity before opening a browser, so a different local application occupying the port is never opened accidentally.
 
 The included `render.yaml` targets the free Render web-service tier, the `hackathon/webmcp` branch, `/api/health`, and disposable `/tmp` storage. Render authorization is still required before a live URL exists. Free services can cold-start after inactivity, so judges may see a brief initial wake-up.
 
@@ -86,7 +88,7 @@ Localhost-only is the default. To deliberately allow access on the current trust
 .\run.ps1 -Lan
 ```
 
-The launcher prints a phone URL such as `http://<tower-ip>:8765`. Keep the computer and iPhone on the same trusted Wi-Fi, allow Python through Windows Firewall for **private networks only** if prompted, and enter the printed URL in Safari. Do not enable LAN mode on public Wi-Fi. Stop the server when finished.
+The launcher prints a phone URL such as `http://<tower-ip>:8876`. Keep the computer and iPhone on the same trusted Wi-Fi, allow Python through Windows Firewall for **private networks only** if prompted, and enter the printed URL in Safari. Do not enable LAN mode on public Wi-Fi. Stop the server when finished.
 
 The app does not create a public internet listener or configure port forwarding. A private overlay network such as Tailscale can carry the same HTTP connection, but is not required or configured by this app.
 
@@ -97,10 +99,10 @@ Browser speech recognition support varies. If the Speak button is unavailable or
 The live database is clearly located at:
 
 ```text
-data\olos-mini-budget.sqlite3
+.hackathon-runtime\data\olos-mini-budget-hackathon.sqlite3
 ```
 
-The `data` directory is ignored by Git. Use **CSV** in Recent activity for a transaction export or **Backup** for a complete JSON backup. Files are downloaded by the browser and never uploaded anywhere. Under **Data and backup tools**, a JSON backup can be restored after an explicit confirmation. Restore replaces current financial records in one database transaction and rejects the same backup if submitted twice.
+The `.hackathon-runtime` directory is ignored by Git. Use **CSV** in Recent activity for a transaction export or **Backup** for a complete JSON backup. Files are downloaded by the browser and never uploaded anywhere. Under **Data and backup tools**, a JSON backup can be restored after an explicit confirmation. Restore replaces current financial records in one database transaction and rejects the same backup if submitted twice.
 
 Back up the JSON file somewhere you control. Closing the server before directly copying the SQLite file is also safe.
 
@@ -140,7 +142,7 @@ Interest increases only the liability estimate; it does not create a cash expens
 
 ## API
 
-Interactive local API documentation is at [http://localhost:8765/api/docs](http://localhost:8765/api/docs). Principal endpoints cover transactions, recurring rules, 30-day and calendar projections, occurrence recording/skipping, credit facilities and payments, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
+Interactive local API documentation is at [http://localhost:8876/api/docs](http://localhost:8876/api/docs). Principal endpoints cover transactions, recurring rules, 30-day and calendar projections, occurrence recording/skipping, credit facilities and payments, monthly summaries, voice-text parsing, CSV/JSON export and confirmed restore.
 
 Inputs are validated with Pydantic, SQL uses parameters, user text is escaped in the browser, CORS is not enabled, and the database file is not served. No secrets are stored. LAN mode has no account system, so it must only be used on a trusted private network.
 

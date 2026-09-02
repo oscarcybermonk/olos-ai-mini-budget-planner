@@ -9,16 +9,16 @@ from pathlib import Path
 
 from .db import transaction
 
-DEMO_COOKIE = "olos_demo_session"
+DEMO_COOKIE = "olos_hackathon_demo_session"
 
 
 def demo_mode_enabled() -> bool:
-    return os.environ.get("OLOS_DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("OLOS_HACKATHON_DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def demo_data_dir() -> Path:
-    configured = os.environ.get("OLOS_DEMO_DATA_DIR")
-    return Path(configured) if configured else Path(tempfile.gettempdir()) / "olos-budget-demo"
+    configured = os.environ.get("OLOS_HACKATHON_DEMO_DATA_DIR")
+    return Path(configured) if configured else Path(tempfile.gettempdir()) / "olos-hackathon-budget-demo"
 
 
 def valid_session_id(value: str | None) -> str | None:

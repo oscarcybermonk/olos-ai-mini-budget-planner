@@ -7,9 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = Path(os.environ.get("OLOS_BUDGET_DATA_DIR", APP_ROOT / "data"))
-DB_PATH = DATA_DIR / "olos-mini-budget.sqlite3"
-_REQUEST_DB_PATH: ContextVar[Path | None] = ContextVar("olos_budget_request_db_path", default=None)
+DATA_DIR = Path(os.environ.get("OLOS_HACKATHON_DATA_DIR", APP_ROOT / ".hackathon-runtime" / "data"))
+DB_PATH = DATA_DIR / "olos-mini-budget-hackathon.sqlite3"
+_REQUEST_DB_PATH: ContextVar[Path | None] = ContextVar("olos_hackathon_request_db_path", default=None)
 
 DEFAULT_CATEGORIES = {
     "expense": ["Groceries", "Dining", "Fuel", "Transport", "Housing", "Utilities", "Phone/Internet", "Subscriptions", "Health", "Shopping", "Entertainment", "Travel", "Work", "Business", "Olos-AI", "Other"],

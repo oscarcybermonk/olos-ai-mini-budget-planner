@@ -1,1 +1,1 @@
-"""Olos Personal Budget Tracker backend."""
+"""Olos-AI Mini Budget Planner hackathon backend."""
