@@ -67,4 +67,4 @@ Python, FastAPI, Pydantic, SQLite, HTML, CSS, JavaScript, PWA APIs, WebMCP imper
 
 - Public repository: https://github.com/oscarcybermonk/olos-ai-mini-budget-planner
 - Live demo URL: **https://olos-ai-mini-budget-planner.onrender.com**
-- Public YouTube video: **PLACEHOLDER — add after recording and upload**
+- Public YouTube video: **https://youtu.be/RqxtiUjFJ3I**

@@ -174,6 +174,10 @@ The stable pre-WebMCP product is preserved on `main` at commit `3b937556a1c26116
 
 Public repository: <https://github.com/oscarcybermonk/olos-ai-mini-budget-planner>
 
+Live demo: <https://olos-ai-mini-budget-planner.onrender.com>
+
+Demo video: <https://youtu.be/RqxtiUjFJ3I>
+
 License: [MIT](LICENSE).
 
 ## Future Apple-client direction
