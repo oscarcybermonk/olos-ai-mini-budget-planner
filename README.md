@@ -78,7 +78,7 @@ Normal mode and hosted demo mode are deliberately separate:
 
 This public project deliberately does not read generic or external-application data environment variables. Its default port, database filename, runtime directory, cookie, launcher name, and application identity are all project-specific. The launchers verify that identity before opening a browser, so a different local application occupying the port is never opened accidentally.
 
-The included `render.yaml` targets the free Render web-service tier, the `hackathon/webmcp` branch, `/api/health`, and disposable `/tmp` storage. Render authorization is still required before a live URL exists. Free services can cold-start after inactivity, so judges may see a brief initial wake-up.
+The hosted hackathon demo is available at [olos-ai-mini-budget-planner.onrender.com](https://olos-ai-mini-budget-planner.onrender.com). The included `render.yaml` targets the free Render web-service tier, the `hackathon/webmcp` branch, `/api/health`, and disposable `/tmp` storage. Free services can cold-start after inactivity, so judges may see a brief initial wake-up.
 
 ## Phone and LAN use
 
